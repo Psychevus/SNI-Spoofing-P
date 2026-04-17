@@ -6,12 +6,15 @@ import json
 import sys
 from pathlib import Path
 
+from .browser import build_launch_plan, launch_browser
 from .config import AppConfig, ConfigError
+from .config_store import delete_profile, list_profiles, profile_from_config, save_profile, show_profile
 from .doctor import format_checks, has_failures, run_doctor
 from .logging_utils import configure_logging
 from .pac import generate_pac
 from .proxy import SpoofingProxy
 from .selftest import test_tunnel
+from .wizard import run_wizard
 
 
 def default_config_path() -> Path:
@@ -25,7 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="sni-spoof",
         description="Run a local TCP proxy with controlled TLS SNI spoofing during connection setup.",
     )
-    parser.add_argument("command", nargs="?", choices=("run", "doctor", "test-tunnel", "pac"), default="run", help="Command to run.")
+    parser.add_argument("command", nargs="?", choices=("run", "doctor", "test-tunnel", "pac", "wizard", "profiles", "launch-browser"), default="run", help="Command to run.")
     parser.add_argument("--config", default=str(default_config_path()), help="Path to the JSON configuration file.")
     parser.add_argument("--profile", help="Named profile from the configuration file.")
     parser.add_argument("--listen-host", help="Local address to bind.")
@@ -59,6 +62,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--test-host", help="Host to test through a running HTTP CONNECT proxy.")
     parser.add_argument("--test-path", default="/", help="HTTP path to request during test-tunnel.")
     parser.add_argument("--pac-output", help="Write generated PAC content to this path instead of stdout.")
+    parser.add_argument("--show-profile", help="Show a profile from the configuration file.")
+    parser.add_argument("--save-profile", help="Save the resolved runtime config as a named profile.")
+    parser.add_argument("--delete-profile", help="Delete a named profile from the configuration file.")
+    parser.add_argument("--browser", default="auto", help="Browser to launch: auto, edge, chrome, brave, or a browser executable.")
+    parser.add_argument("--browser-url", help="URL to open in launch-browser mode.")
+    parser.add_argument("--browser-profile-dir", help="Dedicated browser profile directory.")
+    parser.add_argument("--browser-proxy-mode", choices=("pac", "server"), default="pac", help="Use PAC or direct proxy server arguments for browser launch.")
     return parser
 
 
@@ -97,8 +107,36 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
+        if args.command == "wizard":
+            run_wizard(args.config)
+            return 0
+
+        if args.command == "profiles" and args.delete_profile:
+            delete_profile(args.config, args.delete_profile)
+            print(f"Deleted profile: {args.delete_profile}")
+            return 0
+
+        if args.command == "profiles" and args.show_profile:
+            print(json.dumps(show_profile(args.config, args.show_profile), indent=2, sort_keys=True))
+            return 0
+
+        if args.command == "profiles" and not args.save_profile:
+            profiles = list_profiles(args.config)
+            if not profiles:
+                print("No profiles found.")
+                return 0
+            for name in sorted(profiles):
+                print(name)
+            return 0
+
         config = load_config(args)
         configure_logging(config.log_level, config.log_format)
+
+        if args.command == "profiles" and args.save_profile:
+            save_profile(args.config, args.save_profile, profile_from_config(config))
+            print(f"Saved profile: {args.save_profile}")
+            return 0
+
         if args.dry_run:
             print(json.dumps(config.public_summary(), indent=2, sort_keys=True))
             warnings = config.security_warnings()
@@ -129,6 +167,19 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Wrote PAC file to {args.pac_output}")
             else:
                 print(pac, end="")
+            return 0
+
+        if args.command == "launch-browser":
+            plan = build_launch_plan(
+                config,
+                browser=args.browser,
+                url=args.browser_url,
+                user_data_dir=args.browser_profile_dir,
+                proxy_mode=args.browser_proxy_mode,
+            )
+            pid = launch_browser(plan)
+            print(f"Launched browser process {pid}")
+            print(f"Profile directory: {plan.user_data_dir}")
             return 0
 
         asyncio.run(SpoofingProxy(config).serve())

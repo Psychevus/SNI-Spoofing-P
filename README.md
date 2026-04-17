@@ -96,6 +96,12 @@ Run environment diagnostics:
 python main.py doctor
 ```
 
+Create a config interactively:
+
+```powershell
+python main.py wizard
+```
+
 Generate a PAC file:
 
 ```powershell
@@ -117,6 +123,31 @@ python main.py run --profile vercel-auth
 ```
 
 Profiles live under `PROFILES` and override the base configuration for a specific route or deployment target.
+
+List and inspect profiles:
+
+```powershell
+python main.py profiles
+python main.py profiles --show-profile vercel-auth
+```
+
+Save the current resolved settings as a profile:
+
+```powershell
+python main.py profiles --save-profile my-route --connect-ip 188.114.98.0 --fake-sni auth.vercel.com --allowed-host auth.vercel.com
+```
+
+Launch a dedicated browser profile through the local PAC file:
+
+```powershell
+python main.py launch-browser --browser edge --browser-url https://auth.vercel.com/
+```
+
+Run the proxy in one terminal before launching the browser:
+
+```powershell
+python main.py run
+```
 
 ## HTTP CONNECT Mode
 
