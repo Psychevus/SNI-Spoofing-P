@@ -17,6 +17,8 @@ class ConfigTests(unittest.TestCase):
 
         self.assertEqual(config.listen_host, "127.0.0.1")
         self.assertEqual(config.fake_sni_bytes, b"auth.vercel.com")
+        self.assertEqual(config.proxy_mode, "http_connect")
+        self.assertEqual(config.allowed_hosts, ("auth.vercel.com",))
 
     def test_invalid_port_is_rejected(self):
         with self.assertRaises(ConfigError):
@@ -28,6 +30,15 @@ class ConfigTests(unittest.TestCase):
 
     def test_unicode_sni_is_normalized_to_idna(self):
         self.assertEqual(normalize_sni("täst.example"), b"xn--tst-qla.example")
+
+    def test_http_connect_requires_allowed_hosts(self):
+        with self.assertRaises(ConfigError):
+            AppConfig.from_mapping({"PROXY_MODE": "http_connect", "ALLOWED_HOSTS": []})
+
+    def test_raw_mode_accepts_custom_mode_name(self):
+        config = AppConfig.from_mapping({"PROXY_MODE": "raw"})
+
+        self.assertEqual(config.proxy_mode, "raw")
 
 
 if __name__ == "__main__":

@@ -29,6 +29,46 @@ def _parse_port(value: Any, field_name: str) -> int:
     return port
 
 
+def _parse_string_list(value: Any, field_name: str) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        items = [item.strip() for item in value.split(",")]
+    elif isinstance(value, (list, tuple)):
+        items = [str(item).strip() for item in value]
+    else:
+        raise ConfigError(f"{field_name} must be a string or list")
+    return tuple(item for item in items if item)
+
+
+def _parse_port_list(value: Any, field_name: str) -> tuple[int, ...]:
+    raw_items = _parse_string_list(value, field_name)
+    ports = tuple(_parse_port(item, field_name) for item in raw_items)
+    if not ports:
+        raise ConfigError(f"{field_name} must not be empty")
+    return ports
+
+
+def _parse_positive_float(value: Any, field_name: str) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"{field_name} must be a number") from exc
+    if parsed <= 0:
+        raise ConfigError(f"{field_name} must be greater than zero")
+    return parsed
+
+
+def _parse_positive_int(value: Any, field_name: str) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"{field_name} must be an integer") from exc
+    if parsed <= 0:
+        raise ConfigError(f"{field_name} must be greater than zero")
+    return parsed
+
+
 def normalize_sni(value: str) -> bytes:
     if not isinstance(value, str):
         raise ConfigError("fake_sni must be a string")
@@ -59,6 +99,19 @@ def normalize_sni(value: str) -> bytes:
     return encoded
 
 
+def normalize_host_pattern(value: str) -> str:
+    if value == "*":
+        return "*"
+    if value.startswith("*."):
+        suffix = normalize_sni(value[2:]).decode("ascii").lower()
+        return f"*.{suffix}"
+    return normalize_sni(value).decode("ascii").lower()
+
+
+def normalize_host_patterns(values: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(normalize_host_pattern(value.strip().lower().rstrip(".")) for value in values)
+
+
 @dataclass(frozen=True)
 class AppConfig:
     listen_host: str = "127.0.0.1"
@@ -73,6 +126,14 @@ class AppConfig:
     recv_buffer_size: int = 65575
     backlog: int = 128
     log_level: str = "INFO"
+    proxy_mode: str = "http_connect"
+    allowed_hosts: tuple[str, ...] = ("auth.vercel.com",)
+    allowed_ports: tuple[int, ...] = (443,)
+    auth_token: str | None = None
+    connect_timeout: float = 10.0
+    idle_timeout: float = 300.0
+    max_connect_header_bytes: int = 16384
+    max_active_connections: int = 256
 
     @classmethod
     def load(cls, path: str | Path) -> "AppConfig":
@@ -91,6 +152,13 @@ class AppConfig:
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> "AppConfig":
+        allowed_hosts = normalize_host_patterns(
+            _parse_string_list(_read_value(data, "allowed_hosts", "ALLOWED_HOSTS", default=cls.allowed_hosts), "allowed_hosts")
+        )
+        allowed_ports = _parse_port_list(_read_value(data, "allowed_ports", "ALLOWED_PORTS", default=cls.allowed_ports), "allowed_ports")
+        auth_token = _read_value(data, "auth_token", "AUTH_TOKEN", default=None)
+        if auth_token is not None:
+            auth_token = str(auth_token)
         cfg = cls(
             listen_host=str(_read_value(data, "listen_host", "LISTEN_HOST", default=cls.listen_host)),
             listen_port=_parse_port(_read_value(data, "listen_port", "LISTEN_PORT", default=cls.listen_port), "listen_port"),
@@ -104,12 +172,34 @@ class AppConfig:
             recv_buffer_size=int(_read_value(data, "recv_buffer_size", "RECV_BUFFER_SIZE", default=cls.recv_buffer_size)),
             backlog=int(_read_value(data, "backlog", "BACKLOG", default=cls.backlog)),
             log_level=str(_read_value(data, "log_level", "LOG_LEVEL", default=cls.log_level)).upper(),
+            proxy_mode=str(_read_value(data, "proxy_mode", "PROXY_MODE", default=cls.proxy_mode)).lower().replace("-", "_"),
+            allowed_hosts=allowed_hosts,
+            allowed_ports=allowed_ports,
+            auth_token=auth_token,
+            connect_timeout=_parse_positive_float(_read_value(data, "connect_timeout", "CONNECT_TIMEOUT", default=cls.connect_timeout), "connect_timeout"),
+            idle_timeout=_parse_positive_float(_read_value(data, "idle_timeout", "IDLE_TIMEOUT", default=cls.idle_timeout), "idle_timeout"),
+            max_connect_header_bytes=_parse_positive_int(
+                _read_value(data, "max_connect_header_bytes", "MAX_CONNECT_HEADER_BYTES", default=cls.max_connect_header_bytes),
+                "max_connect_header_bytes",
+            ),
+            max_active_connections=_parse_positive_int(
+                _read_value(data, "max_active_connections", "MAX_ACTIVE_CONNECTIONS", default=cls.max_active_connections),
+                "max_active_connections",
+            ),
         )
         cfg.validate()
         return cfg
 
     def with_overrides(self, **overrides: Any) -> "AppConfig":
         clean = {key: value for key, value in overrides.items() if value is not None}
+        if "proxy_mode" in clean:
+            clean["proxy_mode"] = str(clean["proxy_mode"]).lower().replace("-", "_")
+        if "allowed_hosts" in clean:
+            clean["allowed_hosts"] = normalize_host_patterns(_parse_string_list(clean["allowed_hosts"], "allowed_hosts"))
+        if "allowed_ports" in clean:
+            clean["allowed_ports"] = _parse_port_list(clean["allowed_ports"], "allowed_ports")
+        if "log_level" in clean:
+            clean["log_level"] = str(clean["log_level"]).upper()
         cfg = replace(self, **clean)
         cfg.validate()
         return cfg
@@ -134,16 +224,33 @@ class AppConfig:
             raise ConfigError("only the 'wrong_seq' bypass method is currently implemented")
         if self.data_mode != "tls":
             raise ConfigError("only the 'tls' data mode is currently implemented")
+        if self.proxy_mode not in {"http_connect", "raw"}:
+            raise ConfigError("proxy_mode must be either 'http_connect' or 'raw'")
         if self.handshake_timeout <= 0:
             raise ConfigError("handshake_timeout must be greater than zero")
+        if self.connect_timeout <= 0:
+            raise ConfigError("connect_timeout must be greater than zero")
+        if self.idle_timeout <= 0:
+            raise ConfigError("idle_timeout must be greater than zero")
         if not 1024 <= self.recv_buffer_size <= 262144:
             raise ConfigError("recv_buffer_size must be between 1024 and 262144 bytes")
         if not 1 <= self.backlog <= 4096:
             raise ConfigError("backlog must be between 1 and 4096")
+        if not 1024 <= self.max_connect_header_bytes <= 262144:
+            raise ConfigError("max_connect_header_bytes must be between 1024 and 262144 bytes")
+        if not 1 <= self.max_active_connections <= 10000:
+            raise ConfigError("max_active_connections must be between 1 and 10000")
         if not isinstance(getattr(logging, self.log_level, None), int):
             raise ConfigError("log_level must be a valid Python logging level")
+        if self.proxy_mode == "http_connect" and not self.allowed_hosts:
+            raise ConfigError("allowed_hosts must not be empty when proxy_mode is 'http_connect'")
+        if not self.allowed_ports:
+            raise ConfigError("allowed_ports must not be empty")
+        if self.auth_token == "":
+            raise ConfigError("auth_token must not be empty")
 
         normalize_sni(self.fake_sni)
+        normalize_host_patterns(self.allowed_hosts)
 
     def security_warnings(self) -> list[str]:
         warnings: list[str] = []
@@ -155,6 +262,10 @@ class AppConfig:
 
         if listen_ip and listen_ip.is_unspecified:
             warnings.append("listen_host is bound to all interfaces; restrict it to 127.0.0.1 unless remote clients are required.")
+            if self.proxy_mode == "http_connect" and not self.auth_token:
+                warnings.append("http_connect mode is reachable from all interfaces without proxy authentication.")
+        if self.proxy_mode == "http_connect" and "*" in self.allowed_hosts:
+            warnings.append("allowed_hosts contains '*'; this can turn the service into a broad forwarding proxy.")
         if target_ip.is_private or target_ip.is_loopback or target_ip.is_multicast or target_ip.is_unspecified:
             warnings.append("connect_ip is not a normal public unicast address; confirm this is intentional.")
         if self.connect_port != 443:
@@ -166,13 +277,21 @@ class AppConfig:
     def public_summary(self) -> dict[str, Any]:
         return {
             "listen": f"{self.listen_host}:{self.listen_port}",
+            "proxy_mode": self.proxy_mode,
             "target": f"{self.connect_ip}:{self.connect_port}",
             "fake_sni": self.fake_sni,
             "bypass_method": self.bypass_method,
             "data_mode": self.data_mode,
+            "allowed_hosts": list(self.allowed_hosts),
+            "allowed_ports": list(self.allowed_ports),
+            "auth_enabled": self.auth_token is not None,
             "interface_ipv4": self.interface_ipv4 or "auto",
             "handshake_timeout": self.handshake_timeout,
+            "connect_timeout": self.connect_timeout,
+            "idle_timeout": self.idle_timeout,
             "recv_buffer_size": self.recv_buffer_size,
             "backlog": self.backlog,
+            "max_connect_header_bytes": self.max_connect_header_bytes,
+            "max_active_connections": self.max_active_connections,
             "log_level": self.log_level,
         }

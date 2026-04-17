@@ -134,6 +134,15 @@ class FakeTcpInjector(TcpInjector):
             if connection.bypass_method == "wrong_seq":
                 packet.tcp.seq_num = (connection.syn_seq + 1 - len(packet.tcp.payload)) & 0xffffffff
                 connection.fake_sent = True
+                LOGGER.debug(
+                    "Sending fake payload on %s:%s -> %s:%s with seq=%s payload_len=%s",
+                    connection.src_ip,
+                    connection.src_port,
+                    connection.dst_ip,
+                    connection.dst_port,
+                    packet.tcp.seq_num,
+                    len(packet.tcp.payload),
+                )
                 self.w.send(packet, True)
                 return
 
@@ -164,6 +173,7 @@ class FakeTcpInjector(TcpInjector):
                 self.on_unexpected_packet(packet, connection, f"unexpected inbound syn-ack packet, ack mismatch: {ack_num} != {connection.syn_seq}")
                 return
             connection.syn_ack_seq = seq_num
+            LOGGER.debug("Captured inbound SYN-ACK for %s with seq=%s ack=%s", connection.id, seq_num, ack_num)
             self.w.send(packet, False)
             return
 
@@ -179,6 +189,7 @@ class FakeTcpInjector(TcpInjector):
 
             connection.monitor = False
             connection.t2a_msg = "fake_data_ack_recv"
+            LOGGER.debug("Fake payload ACK received for %s", connection.id)
             connection.running_loop.call_soon_threadsafe(connection.t2a_event.set)
             return
 
@@ -199,6 +210,7 @@ class FakeTcpInjector(TcpInjector):
                 self.on_unexpected_packet(packet, connection, f"unexpected outbound syn packet, seq mismatch: {seq_num} != {connection.syn_seq}")
                 return
             connection.syn_seq = seq_num
+            LOGGER.debug("Captured outbound SYN for %s with seq=%s", connection.id, seq_num)
             self.w.send(packet, False)
             return
 
@@ -214,6 +226,7 @@ class FakeTcpInjector(TcpInjector):
 
             self.w.send(packet, False)
             connection.sch_fake_sent = True
+            LOGGER.debug("Captured outbound ACK for %s; scheduling fake payload", connection.id)
             threading.Thread(target=self.fake_send_thread, args=(packet, connection), daemon=True).start()
             return
 

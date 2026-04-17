@@ -28,10 +28,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--connect-ip", help="Remote IPv4 address to connect to.")
     parser.add_argument("--connect-port", type=int, help="Remote TCP port to connect to.")
     parser.add_argument("--fake-sni", help="Hostname to place in the injected TLS ClientHello.")
+    parser.add_argument("--proxy-mode", choices=("http-connect", "http_connect", "raw"), help="Frontend mode to run.")
+    parser.add_argument("--allowed-host", action="append", dest="allowed_hosts", help="Allowed CONNECT host. Can be repeated.")
+    parser.add_argument("--allowed-ports", help="Comma-separated allowed CONNECT ports.")
+    parser.add_argument("--auth-token", help="Optional proxy authentication token for HTTP CONNECT mode.")
     parser.add_argument("--interface-ipv4", help="Local IPv4 address to use instead of auto-detection.")
+    parser.add_argument("--connect-timeout", type=float, help="Seconds to wait for upstream TCP connection setup.")
+    parser.add_argument("--idle-timeout", type=float, help="Seconds before an idle tunnel is closed.")
     parser.add_argument("--handshake-timeout", type=float, help="Seconds to wait for the injected packet acknowledgement.")
     parser.add_argument("--recv-buffer-size", type=int, help="Relay receive buffer size in bytes.")
     parser.add_argument("--backlog", type=int, help="Listen socket backlog.")
+    parser.add_argument("--max-connect-header-bytes", type=int, help="Maximum HTTP CONNECT header size.")
+    parser.add_argument("--max-active-connections", type=int, help="Maximum concurrent client connections.")
     parser.add_argument("--log-level", help="Python logging level.")
     parser.add_argument("--dry-run", action="store_true", help="Validate configuration and print the resolved runtime plan.")
     return parser
@@ -45,10 +53,18 @@ def load_config(args: argparse.Namespace) -> AppConfig:
         connect_ip=args.connect_ip,
         connect_port=args.connect_port,
         fake_sni=args.fake_sni,
+        proxy_mode=args.proxy_mode,
+        allowed_hosts=args.allowed_hosts,
+        allowed_ports=args.allowed_ports,
+        auth_token=args.auth_token,
         interface_ipv4=args.interface_ipv4,
+        connect_timeout=args.connect_timeout,
+        idle_timeout=args.idle_timeout,
         handshake_timeout=args.handshake_timeout,
         recv_buffer_size=args.recv_buffer_size,
         backlog=args.backlog,
+        max_connect_header_bytes=args.max_connect_header_bytes,
+        max_active_connections=args.max_active_connections,
         log_level=args.log_level.upper() if args.log_level else None,
     )
 

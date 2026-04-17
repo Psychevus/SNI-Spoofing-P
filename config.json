@@ -1,13 +1,24 @@
 {
-  "LISTEN_HOST": "0.0.0.0",
-  "LISTEN_PORT": 40443,
+  "LISTEN_HOST": "127.0.0.1",
+  "LISTEN_PORT": 8080,
+  "PROXY_MODE": "http_connect",
   "CONNECT_IP": "188.114.98.0",
   "CONNECT_PORT": 443,
   "FAKE_SNI": "auth.vercel.com",
+  "ALLOWED_HOSTS": [
+    "auth.vercel.com"
+  ],
+  "ALLOWED_PORTS": [
+    443
+  ],
   "BYPASS_METHOD": "wrong_seq",
   "DATA_MODE": "tls",
   "HANDSHAKE_TIMEOUT": 2.0,
+  "CONNECT_TIMEOUT": 10.0,
+  "IDLE_TIMEOUT": 300.0,
   "RECV_BUFFER_SIZE": 65575,
   "BACKLOG": 128,
+  "MAX_CONNECT_HEADER_BYTES": 16384,
+  "MAX_ACTIVE_CONNECTIONS": 256,
   "LOG_LEVEL": "INFO"
 }
