@@ -1,31 +1,130 @@
 # SNI Spoofing Proxy
 
-A Windows-focused TCP proxy that injects a controlled TLS ClientHello during connection setup and then relays client traffic to a configured TLS endpoint.
+This repository is a maintained fork of the original [patterniha/SNI-Spoofing](https://github.com/patterniha/SNI-Spoofing) project.
 
-The default runtime mode is an HTTP CONNECT proxy on `127.0.0.1:8080`, which makes it practical to use with browsers and command-line clients that support HTTPS proxy settings.
+A Windows-first local proxy for controlled TLS SNI injection, HTTP CONNECT tunneling, browser routing, diagnostics, and safe operator workflows.
+
+The project is designed to make SNI injection experiments easier to run, easier to verify, and harder to misconfigure. It starts with secure local-only defaults, includes a guided setup flow, exposes a small local dashboard, and keeps the packet injector isolated behind a clean proxy interface.
+
+## Highlights
+
+- Local HTTP CONNECT proxy for browsers, CLI tools, and PAC-based routing.
+- WinDivert-backed fake ClientHello injection before the real TLS stream is relayed.
+- Profile system for switching targets without editing code.
+- Interactive setup wizard for first-time configuration.
+- Doctor checks for Windows, administrator rights, Python packages, config validity, and network reachability.
+- Local dashboard with health, metrics, event stream, and PAC endpoint.
+- Strict security defaults: loopback binding, host allowlists, port controls, and optional remote-bind authentication.
+- Focused test suite for configuration, tunnel behavior, policy checks, browser launch helpers, and relay flow.
 
 ## Requirements
 
-- Windows with administrator privileges
-- Python 3.11+
-- WinDivert support through `pydivert`
+- Windows 10 or newer.
+- Python 3.10 or newer.
+- Administrator PowerShell for WinDivert packet capture and injection.
+- Dependencies from `requirements.txt`.
+- A target endpoint you are authorized to test.
 
-Install dependencies:
+The injector depends on WinDivert through `pydivert`. Without administrator privileges, Windows will usually return `WinError 5: Access is denied`.
+
+## Quick Start
+
+Open PowerShell as Administrator:
 
 ```powershell
+cd D:\Projects\SNI-Spoofing-P
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-For editable package usage:
+Run environment checks:
 
 ```powershell
-python -m pip install -e .
-sni-spoof --dry-run
+python main.py doctor
+```
+
+Start the proxy:
+
+```powershell
+python main.py run --log-level DEBUG
+```
+
+In another terminal, send traffic through the local proxy:
+
+```powershell
+curl.exe -vk -x http://127.0.0.1:8080 https://auth.vercel.com/
+```
+
+For a direct raw TCP listener instead of HTTP CONNECT:
+
+```powershell
+python main.py run --listen-host 127.0.0.1 --listen-port 40443 --proxy-mode raw
+curl.exe -vk --connect-to auth.vercel.com:443:127.0.0.1:40443 https://auth.vercel.com/
+```
+
+## Browser Workflow
+
+The simplest browser workflow is to launch an isolated browser profile with the proxy already configured:
+
+```powershell
+python main.py launch-browser --browser edge --browser-url https://auth.vercel.com/
+```
+
+You can also configure a browser manually with the PAC URL:
+
+```text
+http://127.0.0.1:9090/proxy.pac
+```
+
+The PAC route only sends configured hostnames through the local proxy and lets unrelated traffic go direct.
+
+## Dashboard
+
+When the control server is enabled, the local dashboard listens on:
+
+```text
+http://127.0.0.1:9090/
+```
+
+Useful endpoints:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `/` | Human-readable local status page |
+| `/health` | Lightweight health check |
+| `/metrics` | JSON counters and runtime state |
+| `/events` | Recent structured events |
+| `/proxy.pac` | PAC file for browser routing |
+
+Keep the control server on loopback unless you have a specific operational reason to expose it.
+
+## Commands
+
+| Command | Description |
+| --- | --- |
+| `python main.py run` | Start the proxy and injector |
+| `python main.py doctor` | Validate runtime, permissions, packages, config, and network reachability |
+| `python main.py wizard` | Create or update configuration interactively |
+| `python main.py profiles` | List available profiles |
+| `python main.py profiles --show-profile <name>` | Inspect a profile |
+| `python main.py profiles --save-profile <name>` | Save current runtime options as a profile |
+| `python main.py profiles --delete-profile <name>` | Remove a profile |
+| `python main.py pac` | Print the generated PAC file |
+| `python main.py test-tunnel` | Run a local tunnel smoke test |
+| `python main.py launch-browser` | Launch a browser with an isolated proxy profile |
+
+Global options can be combined with commands. For example:
+
+```powershell
+python main.py --profile vercel-auth --log-level DEBUG run
+python main.py --connect-ip 188.114.98.0 --fake-sni auth.vercel.com --dry-run
 ```
 
 ## Configuration
 
-Edit `config.json` or override values from the command line.
+Runtime defaults live in `config.json` and can be overridden with CLI flags. A compact configuration looks like this:
 
 ```json
 {
@@ -35,246 +134,189 @@ Edit `config.json` or override values from the command line.
   "CONNECT_IP": "188.114.98.0",
   "CONNECT_PORT": 443,
   "FAKE_SNI": "auth.vercel.com",
-  "ALLOWED_HOSTS": [
-    "auth.vercel.com"
-  ],
-  "ALLOWED_PORTS": [
-    443
-  ],
-  "BYPASS_METHOD": "wrong_seq",
-  "DATA_MODE": "tls",
-  "HANDSHAKE_TIMEOUT": 2.0,
-  "CONNECT_TIMEOUT": 10.0,
-  "IDLE_TIMEOUT": 300.0,
-  "RECV_BUFFER_SIZE": 65575,
-  "BACKLOG": 128,
-  "MAX_CONNECT_HEADER_BYTES": 16384,
-  "MAX_ACTIVE_CONNECTIONS": 256,
+  "ALLOWED_HOSTS": ["auth.vercel.com"],
+  "ALLOWED_PORTS": [443],
   "STRICT_LOCAL_ONLY": true,
-  "REQUIRE_AUTH_FOR_REMOTE_BIND": true,
   "CONTROL_ENABLED": true,
   "CONTROL_HOST": "127.0.0.1",
   "CONTROL_PORT": 9090,
   "LOG_LEVEL": "INFO",
-  "LOG_FORMAT": "text"
+  "PROFILES": {
+    "vercel-auth": {
+      "CONNECT_IP": "188.114.98.0",
+      "CONNECT_PORT": 443,
+      "FAKE_SNI": "auth.vercel.com",
+      "ALLOWED_HOSTS": ["auth.vercel.com"],
+      "ALLOWED_PORTS": [443]
+    }
+  }
 }
 ```
 
-Security note: the default configuration is local-only. To bind outside loopback, disable `STRICT_LOCAL_ONLY` and set `AUTH_TOKEN`.
+Recommended defaults:
 
-## Usage
+- Use `127.0.0.1` for `LISTEN_HOST` during local use.
+- Keep `STRICT_LOCAL_ONLY` enabled unless remote clients are required.
+- Keep `ALLOWED_HOSTS` narrow.
+- Use `doctor` after changing target, profile, host, or port settings.
 
-Validate the configuration without starting WinDivert:
+## Profiles
+
+Profiles make target switching predictable and repeatable:
+
+```powershell
+python main.py profiles
+python main.py profiles --show-profile vercel-auth
+python main.py --profile vercel-auth run
+```
+
+Save the current command-line configuration as a profile:
+
+```powershell
+python main.py --connect-ip 188.114.98.0 --fake-sni auth.vercel.com profiles --save-profile vercel-auth
+```
+
+## Security Model
+
+This tool is intentionally conservative by default.
+
+- Local-only listener by default: `127.0.0.1`.
+- Control dashboard bound to loopback by default.
+- Host allowlist enforced for HTTP CONNECT requests.
+- Optional auth token requirement when remote binding is enabled.
+- Request header size limits for CONNECT parsing.
+- Connection timeouts and capacity limits for predictable resource use.
+- Structured warnings when configuration expands the exposed surface.
+
+If you bind the proxy to `0.0.0.0`, treat it like an exposed network service. Restrict firewall rules, set an auth token where supported, and keep the host allowlist tight.
+
+## Architecture
+
+The package is organized around small, focused modules:
+
+| Module | Responsibility |
+| --- | --- |
+| `sni_spoof.cli` | Command-line interface and runtime assembly |
+| `sni_spoof.config` | Configuration model, validation, profiles, and security warnings |
+| `sni_spoof.proxy` | Proxy lifecycle, client handling, injector coordination, and control server startup |
+| `sni_spoof.injector` | WinDivert packet capture, TCP state tracking, and fake payload injection |
+| `sni_spoof.http_connect` | HTTP CONNECT parsing and response helpers |
+| `sni_spoof.policy` | Host and port access policy |
+| `sni_spoof.relay` | Bidirectional stream relay helpers |
+| `sni_spoof.control` | Local dashboard, metrics, events, and PAC serving |
+| `sni_spoof.doctor` | Runtime diagnostics |
+| `sni_spoof.wizard` | Guided configuration |
+| `sni_spoof.browser` | Isolated browser launch support |
+
+The proxy opens the upstream TCP connection, the injector observes the handshake, injects the fake ClientHello, waits for acknowledgement, and then the relay forwards the real client stream.
+
+## Observability
+
+Use debug logging while validating a target:
+
+```powershell
+python main.py run --log-level DEBUG
+```
+
+Useful log milestones:
+
+- Proxy listener started.
+- Client connection accepted.
+- Upstream connection opened.
+- Outbound SYN captured.
+- Inbound SYN-ACK captured.
+- Fake payload sent.
+- Fake payload acknowledged.
+- Relay started and finished.
+
+For automation or external monitoring, use the dashboard JSON endpoints:
+
+```powershell
+curl.exe http://127.0.0.1:9090/health
+curl.exe http://127.0.0.1:9090/metrics
+curl.exe http://127.0.0.1:9090/events
+```
+
+## Troubleshooting
+
+### `WinError 5: Access is denied`
+
+Run PowerShell as Administrator. WinDivert needs elevated privileges to open the packet capture driver.
+
+### `pydivert is not installed`
+
+Activate the virtual environment and install dependencies:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+```
+
+### The proxy starts but no connections appear
+
+Make sure the client is actually routed through the proxy. Use one of these:
+
+```powershell
+curl.exe -vk -x http://127.0.0.1:8080 https://auth.vercel.com/
+python main.py launch-browser --browser edge --browser-url https://auth.vercel.com/
+```
+
+### The fake payload is not acknowledged
+
+Check that `CONNECT_IP`, `CONNECT_PORT`, and local network interface selection are correct. Then rerun:
+
+```powershell
+python main.py doctor
+python main.py run --log-level DEBUG
+```
+
+### Browser traffic still goes direct
+
+Use the generated PAC URL or the browser launcher. Also confirm the hostname is present in `ALLOWED_HOSTS`.
+
+## Testing
+
+Run the test suite:
+
+```powershell
+python -m unittest discover -s tests
+```
+
+Run a syntax check:
+
+```powershell
+python -m compileall main.py sni_spoof tests
+```
+
+Validate configuration without starting the injector:
 
 ```powershell
 python main.py --dry-run
 ```
 
-Run the proxy:
+## Packaging
+
+Install the project in editable mode:
 
 ```powershell
-python main.py run
+python -m pip install -e .
 ```
 
-Override common settings:
+Then run it through the console script:
 
 ```powershell
-python main.py --listen-host 127.0.0.1 --listen-port 8080 --fake-sni auth.vercel.com
+sni-spoof --dry-run
+sni-spoof run --log-level DEBUG
 ```
 
-The module entry point is also available:
+## Operational Notes
 
-```powershell
-python -m sni_spoof --dry-run
-```
+- Keep target configuration explicit and versioned.
+- Prefer profiles over one-off command lines for repeated work.
+- Run `doctor` after network, VPN, DNS, firewall, or target changes.
+- Keep the proxy local unless remote clients are part of the plan.
+- Use the dashboard for quick confirmation, not as a public service.
 
-## Commands
+## Acknowledgements
 
-Run environment diagnostics:
-
-```powershell
-python main.py doctor
-```
-
-Create a config interactively:
-
-```powershell
-python main.py wizard
-```
-
-Generate a PAC file:
-
-```powershell
-python main.py pac --pac-output proxy.pac
-```
-
-Test a running proxy tunnel:
-
-```powershell
-python main.py test-tunnel --test-host auth.vercel.com
-```
-
-The default command is `run`, so `python main.py` and `python main.py run` are equivalent.
-
-Use a named profile from `config.json`:
-
-```powershell
-python main.py run --profile vercel-auth
-```
-
-Profiles live under `PROFILES` and override the base configuration for a specific route or deployment target.
-
-List and inspect profiles:
-
-```powershell
-python main.py profiles
-python main.py profiles --show-profile vercel-auth
-```
-
-Save the current resolved settings as a profile:
-
-```powershell
-python main.py profiles --save-profile my-route --connect-ip 188.114.98.0 --fake-sni auth.vercel.com --allowed-host auth.vercel.com
-```
-
-Launch a dedicated browser profile through the local PAC file:
-
-```powershell
-python main.py launch-browser --browser edge --browser-url https://auth.vercel.com/
-```
-
-Run the proxy in one terminal before launching the browser:
-
-```powershell
-python main.py run
-```
-
-## HTTP CONNECT Mode
-
-The default mode accepts HTTP CONNECT requests and creates a spoofed upstream TCP tunnel. This is the recommended mode for normal use.
-
-Quick test:
-
-```powershell
-curl.exe -vk -x http://127.0.0.1:8080 https://auth.vercel.com/
-```
-
-Expected runtime logs include:
-
-- `Accepted client connection`
-- `CONNECT auth.vercel.com:443 accepted`
-- `Opening upstream connection`
-- `Tunnel established`
-- `Relay finished`
-
-Configure browser HTTPS proxy settings to:
-
-- Host: `127.0.0.1`
-- Port: `8080`
-
-The local dashboard is available while the proxy is running:
-
-- Dashboard: `http://127.0.0.1:9090/`
-- Health: `http://127.0.0.1:9090/health`
-- Metrics: `http://127.0.0.1:9090/metrics`
-- PAC: `http://127.0.0.1:9090/proxy.pac`
-
-For browser auto-configuration, use this PAC URL:
-
-```text
-http://127.0.0.1:9090/proxy.pac
-```
-
-`ALLOWED_HOSTS` and `ALLOWED_PORTS` are enforced before a tunnel is opened. This prevents the service from becoming a broad local forwarding proxy by accident.
-
-Optional proxy authentication can be enabled with `AUTH_TOKEN` in `config.json` or with:
-
-```powershell
-python main.py --auth-token "change-this-token"
-```
-
-Then test with:
-
-```powershell
-curl.exe -vk -x http://127.0.0.1:8080 --proxy-header "Proxy-Authorization: Bearer change-this-token" https://auth.vercel.com/
-```
-
-## Raw TCP Mode
-
-Raw mode keeps the lower-level relay behavior available for controlled tests:
-
-```powershell
-python main.py --proxy-mode raw --listen-port 40443
-```
-
-Then route one hostname to the raw listener:
-
-```powershell
-curl.exe -vk --connect-to auth.vercel.com:443:127.0.0.1:40443 https://auth.vercel.com/
-```
-
-Do not use raw mode as a browser HTTP proxy.
-
-For deeper packet-level diagnostics:
-
-```powershell
-python main.py --log-level DEBUG
-```
-
-For structured logs:
-
-```powershell
-python main.py --log-format json
-```
-
-## Architecture
-
-- `sni_spoof.config` loads legacy and modern JSON keys, validates values, and reports security warnings.
-- `sni_spoof.cli` provides the command-line interface and dry-run mode.
-- `sni_spoof.control` serves the local dashboard, health endpoint, metrics, and PAC file.
-- `sni_spoof.doctor` checks runtime prerequisites and common environment problems.
-- `sni_spoof.http_connect` parses and validates HTTP CONNECT requests.
-- `sni_spoof.metrics` records counters, active connections, traffic volume, and recent events.
-- `sni_spoof.pac` generates browser proxy auto-configuration.
-- `sni_spoof.policy` enforces host and port access policy.
-- `sni_spoof.proxy` owns socket lifecycle, connection setup, fake handshake waiting, and bidirectional relay.
-- `sni_spoof.selftest` verifies a running HTTP CONNECT tunnel end to end.
-- `sni_spoof.injector` owns WinDivert packet processing and connection tracking.
-- `sni_spoof.packets` builds and validates supported TLS packet templates.
-- Legacy root modules remain as compatibility wrappers.
-
-## Safety Checks
-
-The application validates:
-
-- TCP port ranges
-- target IP format
-- optional local interface IP format
-- SNI hostname shape and IDNA normalization
-- HTTP CONNECT host and port allowlists
-- optional proxy authentication token
-- strict local-only binding by default
-- required auth token for remote HTTP CONNECT binding
-- loopback-only control dashboard binding
-- CONNECT header size limits
-- upstream connect and tunnel idle timeouts
-- maximum active connection count
-- text and JSON log formats
-- supported data mode and bypass method
-- relay buffer and backlog limits
-
-Dry-run mode prints the resolved runtime plan and warns about risky choices such as binding to all interfaces.
-
-## Testing
-
-Run the unit tests that do not require WinDivert:
-
-```powershell
-python -B -m unittest discover -s tests
-```
-
-Run a configuration health check:
-
-```powershell
-python -B main.py --dry-run
-```
+Special thanks to [patterniha](https://github.com/patterniha) and the original [SNI-Spoofing](https://github.com/patterniha/SNI-Spoofing) project for the initial idea and foundation. This fork builds on that work with a stronger operator experience, safer defaults, expanded diagnostics, and a more maintainable architecture.
