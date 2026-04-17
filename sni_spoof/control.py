@@ -37,8 +37,12 @@ class ControlServer:
 
     async def _handle(self, client_sock: socket.socket) -> None:
         try:
-            request = await self._read_request(client_sock)
-            method, path = self._parse_request_line(request)
+            try:
+                request = await self._read_request(client_sock)
+                method, path = self._parse_request_line(request)
+            except asyncio.TimeoutError:
+                await self._send(client_sock, 408, "Request Timeout", "text/plain", b"request timeout")
+                return
             if method != "GET":
                 await self._send(client_sock, 405, "Method Not Allowed", "text/plain", b"method not allowed")
                 return
@@ -55,6 +59,8 @@ class ControlServer:
                 await self._send(client_sock, 200, "OK", "application/x-ns-proxy-autoconfig", generate_pac(self.config).encode("utf-8"))
             else:
                 await self._send(client_sock, 404, "Not Found", "text/plain", b"not found")
+        except OSError:
+            return
         finally:
             with suppress(OSError):
                 client_sock.close()
@@ -79,7 +85,8 @@ class ControlServer:
         return method.upper(), path.split("?", 1)[0]
 
     async def _send_json(self, client_sock: socket.socket, payload: dict[str, Any]) -> None:
-        await self._send(client_sock, 200, "OK", "application/json; charset=utf-8", json.dumps(payload, indent=2, sort_keys=True).encode("utf-8"))
+        body = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
+        await self._send(client_sock, 200, "OK", "application/json; charset=utf-8", body)
 
     async def _send(self, client_sock: socket.socket, status: int, reason: str, content_type: str, body: bytes) -> None:
         loop = asyncio.get_running_loop()
@@ -125,14 +132,22 @@ class ControlServer:
 <body>
 <main>
   <h1>SNI Spoofing Proxy</h1>
-  <p>Mode: <code>{escape(self.config.proxy_mode)}</code> | Listener: <code>{escape(self.config.listen_host)}:{self.config.listen_port}</code></p>
+  <p>
+    Mode: <code>{escape(self.config.proxy_mode)}</code>
+    | Listener: <code>{escape(self.config.listen_host)}:{self.config.listen_port}</code>
+  </p>
   <div class="panel">
     <h2>Runtime</h2>
     <table>{rows}</table>
   </div>
   <div class="panel">
     <h2>Links</h2>
-    <p><a href="/health">Health</a> | <a href="/metrics">Metrics JSON</a> | <a href="/config">Config Summary</a> | <a href="/proxy.pac">PAC File</a></p>
+    <p>
+      <a href="/health">Health</a> |
+      <a href="/metrics">Metrics JSON</a> |
+      <a href="/config">Config Summary</a> |
+      <a href="/proxy.pac">PAC File</a>
+    </p>
   </div>
   <div class="panel">
     <h2>Recent Events</h2>

@@ -16,10 +16,11 @@ class ConfigStoreAndBrowserTests(unittest.TestCase):
             path = Path(tmp) / "config.json"
             path.write_text("{}", encoding="utf-8")
 
-            save_profile(path, "demo", {"FAKE_SNI": "demo.example"})
+            save_profile(path, "demo", {"FAKE_SNI": "demo.example", "UNRELATED": True})
 
             self.assertIn("demo", list_profiles(path))
             self.assertEqual(show_profile(path, "demo")["FAKE_SNI"], "demo.example")
+            self.assertNotIn("UNRELATED", show_profile(path, "demo"))
 
             delete_profile(path, "demo")
 

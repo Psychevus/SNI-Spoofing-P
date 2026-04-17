@@ -47,7 +47,18 @@ class ClientHelloMaker:
         )
         padding_size = 219 - len(target_sni)
         padding_ext = struct.pack("!H", padding_size) + (b"\x00" * padding_size)
-        return cls.static1 + rnd + cls.static2 + sess_id + cls.static3 + server_name_ext + cls.static4 + key_share + cls.static5 + padding_ext
+        return (
+            cls.static1
+            + rnd
+            + cls.static2
+            + sess_id
+            + cls.static3
+            + server_name_ext
+            + cls.static4
+            + key_share
+            + cls.static5
+            + padding_ext
+        )
 
     @classmethod
     def parse_client_hello(cls, client_hello_bytes: bytes) -> tuple[bytes, bytes, str, bytes]:
@@ -96,7 +107,18 @@ class ServerHelloMaker:
         _require_exact_bytes("rnd", rnd, 32)
         _require_exact_bytes("sess_id", sess_id, 32)
         _require_exact_bytes("key_share", key_share, 32)
-        return cls.static1 + rnd + cls.static2 + sess_id + cls.static3 + key_share + cls.tls_change_cipher + cls.tls_app_data_header + struct.pack("!H", len(app_data1)) + app_data1
+        return (
+            cls.static1
+            + rnd
+            + cls.static2
+            + sess_id
+            + cls.static3
+            + key_share
+            + cls.tls_change_cipher
+            + cls.tls_app_data_header
+            + struct.pack("!H", len(app_data1))
+            + app_data1
+        )
 
     @classmethod
     def parse_server_hello(cls, server_hello_bytes: bytes) -> tuple[bytes, bytes, bytes, bytes]:

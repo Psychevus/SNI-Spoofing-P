@@ -35,7 +35,13 @@ def run_doctor(config: AppConfig) -> list[DoctorCheck]:
     checks.append(DoctorCheck("administrator", "ok" if is_admin() else "fail", "administrator privileges are required for WinDivert"))
 
     pydivert_spec = importlib.util.find_spec("pydivert")
-    checks.append(DoctorCheck("pydivert", "ok" if pydivert_spec else "fail", "pydivert is importable" if pydivert_spec else "pydivert is not installed"))
+    checks.append(
+        DoctorCheck(
+            "pydivert",
+            "ok" if pydivert_spec else "fail",
+            "pydivert is importable" if pydivert_spec else "pydivert is not installed",
+        )
+    )
 
     try:
         config.validate()

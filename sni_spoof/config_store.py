@@ -18,6 +18,19 @@ PROFILE_KEYS = (
 )
 
 
+def _profiles_ref(data: dict[str, Any]) -> dict[str, Any]:
+    profiles = data.pop("profiles", data.get("PROFILES", {}))
+    if not isinstance(profiles, dict):
+        raise ConfigError("profiles must be a JSON object")
+    data["PROFILES"] = profiles
+    return profiles
+
+
+def _normalize_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
+    normalized = dict(profile)
+    return {key: normalized[key] for key in PROFILE_KEYS if key in normalized}
+
+
 def read_config_document(path: str | Path) -> dict[str, Any]:
     config_path = Path(path)
     try:
@@ -42,10 +55,7 @@ def write_config_document(path: str | Path, data: Mapping[str, Any]) -> None:
 
 def list_profiles(path: str | Path) -> dict[str, Any]:
     data = read_config_document(path)
-    profiles = data.get("PROFILES", data.get("profiles", {}))
-    if not isinstance(profiles, dict):
-        raise ConfigError("profiles must be a JSON object")
-    return profiles
+    return dict(_profiles_ref(data))
 
 
 def show_profile(path: str | Path, name: str) -> dict[str, Any]:
@@ -62,22 +72,17 @@ def save_profile(path: str | Path, name: str, profile: Mapping[str, Any]) -> Non
     if not name:
         raise ConfigError("profile name must not be empty")
     data = read_config_document(path)
-    profiles = data.setdefault("PROFILES", {})
-    if not isinstance(profiles, dict):
-        raise ConfigError("profiles must be a JSON object")
-    profiles[name] = dict(profile)
+    profiles = _profiles_ref(data)
+    profiles[name] = _normalize_profile(profile)
     write_config_document(path, data)
 
 
 def delete_profile(path: str | Path, name: str) -> None:
     data = read_config_document(path)
-    profiles = data.get("PROFILES", data.get("profiles", {}))
-    if not isinstance(profiles, dict):
-        raise ConfigError("profiles must be a JSON object")
+    profiles = _profiles_ref(data)
     if name not in profiles:
         raise ConfigError(f"profile not found: {name}")
     del profiles[name]
-    data["PROFILES"] = profiles
     write_config_document(path, data)
 
 

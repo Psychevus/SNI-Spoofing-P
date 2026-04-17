@@ -8,7 +8,13 @@ from pathlib import Path
 
 from .browser import build_launch_plan, launch_browser
 from .config import AppConfig, ConfigError
-from .config_store import delete_profile, list_profiles, profile_from_config, save_profile, show_profile
+from .config_store import (
+    delete_profile,
+    list_profiles,
+    profile_from_config,
+    save_profile,
+    show_profile,
+)
 from .doctor import format_checks, has_failures, run_doctor
 from .logging_utils import configure_logging
 from .pac import generate_pac
@@ -28,7 +34,13 @@ def build_parser() -> argparse.ArgumentParser:
         prog="sni-spoof",
         description="Run a local TCP proxy with controlled TLS SNI spoofing during connection setup.",
     )
-    parser.add_argument("command", nargs="?", choices=("run", "doctor", "test-tunnel", "pac", "wizard", "profiles", "launch-browser"), default="run", help="Command to run.")
+    parser.add_argument(
+        "command",
+        nargs="?",
+        choices=("run", "doctor", "test-tunnel", "pac", "wizard", "profiles", "launch-browser"),
+        default="run",
+        help="Command to run.",
+    )
     parser.add_argument("--config", default=str(default_config_path()), help="Path to the JSON configuration file.")
     parser.add_argument("--profile", help="Named profile from the configuration file.")
     parser.add_argument("--listen-host", help="Local address to bind.")
@@ -41,11 +53,39 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--allowed-ports", help="Comma-separated allowed CONNECT ports.")
     parser.add_argument("--auth-token", help="Optional proxy authentication token for HTTP CONNECT mode.")
     parser.add_argument("--interface-ipv4", help="Local IPv4 address to use instead of auto-detection.")
-    parser.add_argument("--strict-local-only", dest="strict_local_only", action="store_true", default=None, help="Require loopback listener binding.")
-    parser.add_argument("--allow-remote-bind", dest="strict_local_only", action="store_false", help="Allow non-loopback listener binding.")
-    parser.add_argument("--require-auth-for-remote-bind", dest="require_auth_for_remote_bind", action="store_true", default=None, help="Require auth token when binding HTTP CONNECT remotely.")
-    parser.add_argument("--no-require-auth-for-remote-bind", dest="require_auth_for_remote_bind", action="store_false", help="Allow remote HTTP CONNECT binding without auth.")
-    parser.add_argument("--control-enabled", dest="control_enabled", action="store_true", default=None, help="Enable local control dashboard.")
+    parser.add_argument(
+        "--strict-local-only",
+        dest="strict_local_only",
+        action="store_true",
+        default=None,
+        help="Require loopback listener binding.",
+    )
+    parser.add_argument(
+        "--allow-remote-bind",
+        dest="strict_local_only",
+        action="store_false",
+        help="Allow non-loopback listener binding.",
+    )
+    parser.add_argument(
+        "--require-auth-for-remote-bind",
+        dest="require_auth_for_remote_bind",
+        action="store_true",
+        default=None,
+        help="Require auth token when binding HTTP CONNECT remotely.",
+    )
+    parser.add_argument(
+        "--no-require-auth-for-remote-bind",
+        dest="require_auth_for_remote_bind",
+        action="store_false",
+        help="Allow remote HTTP CONNECT binding without auth.",
+    )
+    parser.add_argument(
+        "--control-enabled",
+        dest="control_enabled",
+        action="store_true",
+        default=None,
+        help="Enable local control dashboard.",
+    )
     parser.add_argument("--control-disabled", dest="control_enabled", action="store_false", help="Disable local control dashboard.")
     parser.add_argument("--control-host", help="Control dashboard bind address.")
     parser.add_argument("--control-port", type=int, help="Control dashboard TCP port.")
@@ -68,7 +108,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--browser", default="auto", help="Browser to launch: auto, edge, chrome, brave, or a browser executable.")
     parser.add_argument("--browser-url", help="URL to open in launch-browser mode.")
     parser.add_argument("--browser-profile-dir", help="Dedicated browser profile directory.")
-    parser.add_argument("--browser-proxy-mode", choices=("pac", "server"), default="pac", help="Use PAC or direct proxy server arguments for browser launch.")
+    parser.add_argument(
+        "--browser-proxy-mode",
+        choices=("pac", "server"),
+        default="pac",
+        help="Use PAC or direct proxy server arguments for browser launch.",
+    )
     return parser
 
 

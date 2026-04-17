@@ -163,28 +163,44 @@ class FakeTcpInjector(TcpInjector):
             self.on_unexpected_packet(packet, connection, "unexpected inbound packet, no syn sent")
             return
 
-        if packet.tcp.ack and packet.tcp.syn and not packet.tcp.rst and not packet.tcp.fin and len(packet.tcp.payload) == 0:
+        if self._is_empty_ack_packet(packet, syn=True):
             seq_num = packet.tcp.seq_num
             ack_num = packet.tcp.ack_num
             if connection.syn_ack_seq != -1 and connection.syn_ack_seq != seq_num:
-                self.on_unexpected_packet(packet, connection, f"unexpected inbound syn-ack packet, seq changed: {seq_num} != {connection.syn_ack_seq}")
+                self.on_unexpected_packet(
+                    packet,
+                    connection,
+                    f"unexpected inbound syn-ack packet, seq changed: {seq_num} != {connection.syn_ack_seq}",
+                )
                 return
             if ack_num != ((connection.syn_seq + 1) & 0xffffffff):
-                self.on_unexpected_packet(packet, connection, f"unexpected inbound syn-ack packet, ack mismatch: {ack_num} != {connection.syn_seq}")
+                self.on_unexpected_packet(
+                    packet,
+                    connection,
+                    f"unexpected inbound syn-ack packet, ack mismatch: {ack_num} != {connection.syn_seq}",
+                )
                 return
             connection.syn_ack_seq = seq_num
             LOGGER.debug("Captured inbound SYN-ACK for %s with seq=%s ack=%s", connection.id, seq_num, ack_num)
             self.w.send(packet, False)
             return
 
-        if packet.tcp.ack and not packet.tcp.syn and not packet.tcp.rst and not packet.tcp.fin and len(packet.tcp.payload) == 0 and connection.fake_sent:
+        if self._is_empty_ack_packet(packet) and connection.fake_sent:
             seq_num = packet.tcp.seq_num
             ack_num = packet.tcp.ack_num
             if connection.syn_ack_seq == -1 or ((connection.syn_ack_seq + 1) & 0xffffffff) != seq_num:
-                self.on_unexpected_packet(packet, connection, f"unexpected inbound ack packet, seq mismatch: {seq_num} != {connection.syn_ack_seq}")
+                self.on_unexpected_packet(
+                    packet,
+                    connection,
+                    f"unexpected inbound ack packet, seq mismatch: {seq_num} != {connection.syn_ack_seq}",
+                )
                 return
             if ack_num != ((connection.syn_seq + 1) & 0xffffffff):
-                self.on_unexpected_packet(packet, connection, f"unexpected inbound ack packet, ack mismatch: {ack_num} != {connection.syn_seq}")
+                self.on_unexpected_packet(
+                    packet,
+                    connection,
+                    f"unexpected inbound ack packet, ack mismatch: {ack_num} != {connection.syn_seq}",
+                )
                 return
 
             connection.monitor = False
@@ -200,28 +216,40 @@ class FakeTcpInjector(TcpInjector):
             self.on_unexpected_packet(packet, connection, "unexpected outbound packet after fake packet was scheduled")
             return
 
-        if packet.tcp.syn and not packet.tcp.ack and not packet.tcp.rst and not packet.tcp.fin and len(packet.tcp.payload) == 0:
+        if self._is_empty_syn_packet(packet):
             seq_num = packet.tcp.seq_num
             ack_num = packet.tcp.ack_num
             if ack_num != 0:
                 self.on_unexpected_packet(packet, connection, "unexpected outbound syn packet with non-zero ack")
                 return
             if connection.syn_seq != -1 and connection.syn_seq != seq_num:
-                self.on_unexpected_packet(packet, connection, f"unexpected outbound syn packet, seq mismatch: {seq_num} != {connection.syn_seq}")
+                self.on_unexpected_packet(
+                    packet,
+                    connection,
+                    f"unexpected outbound syn packet, seq mismatch: {seq_num} != {connection.syn_seq}",
+                )
                 return
             connection.syn_seq = seq_num
             LOGGER.debug("Captured outbound SYN for %s with seq=%s", connection.id, seq_num)
             self.w.send(packet, False)
             return
 
-        if packet.tcp.ack and not packet.tcp.syn and not packet.tcp.rst and not packet.tcp.fin and len(packet.tcp.payload) == 0:
+        if self._is_empty_ack_packet(packet):
             seq_num = packet.tcp.seq_num
             ack_num = packet.tcp.ack_num
             if connection.syn_seq == -1 or ((connection.syn_seq + 1) & 0xffffffff) != seq_num:
-                self.on_unexpected_packet(packet, connection, f"unexpected outbound ack packet, seq mismatch: {seq_num} != {connection.syn_seq}")
+                self.on_unexpected_packet(
+                    packet,
+                    connection,
+                    f"unexpected outbound ack packet, seq mismatch: {seq_num} != {connection.syn_seq}",
+                )
                 return
             if connection.syn_ack_seq == -1 or ack_num != ((connection.syn_ack_seq + 1) & 0xffffffff):
-                self.on_unexpected_packet(packet, connection, f"unexpected outbound ack packet, ack mismatch: {ack_num} != {connection.syn_ack_seq}")
+                self.on_unexpected_packet(
+                    packet,
+                    connection,
+                    f"unexpected outbound ack packet, ack mismatch: {ack_num} != {connection.syn_ack_seq}",
+                )
                 return
 
             self.w.send(packet, False)
@@ -231,6 +259,26 @@ class FakeTcpInjector(TcpInjector):
             return
 
         self.on_unexpected_packet(packet, connection, "unexpected outbound packet")
+
+    @staticmethod
+    def _is_empty_syn_packet(packet: Packet) -> bool:
+        return (
+            packet.tcp.syn
+            and not packet.tcp.ack
+            and not packet.tcp.rst
+            and not packet.tcp.fin
+            and len(packet.tcp.payload) == 0
+        )
+
+    @staticmethod
+    def _is_empty_ack_packet(packet: Packet, syn: bool = False) -> bool:
+        return (
+            packet.tcp.ack
+            and bool(packet.tcp.syn) is syn
+            and not packet.tcp.rst
+            and not packet.tcp.fin
+            and len(packet.tcp.payload) == 0
+        )
 
     def inject(self, packet: Packet) -> None:
         if packet.is_inbound:

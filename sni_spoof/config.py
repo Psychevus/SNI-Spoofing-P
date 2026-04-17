@@ -213,8 +213,14 @@ class AppConfig:
             allowed_hosts=allowed_hosts,
             allowed_ports=allowed_ports,
             auth_token=auth_token,
-            connect_timeout=_parse_positive_float(_read_value(data, "connect_timeout", "CONNECT_TIMEOUT", default=cls.connect_timeout), "connect_timeout"),
-            idle_timeout=_parse_positive_float(_read_value(data, "idle_timeout", "IDLE_TIMEOUT", default=cls.idle_timeout), "idle_timeout"),
+            connect_timeout=_parse_positive_float(
+                _read_value(data, "connect_timeout", "CONNECT_TIMEOUT", default=cls.connect_timeout),
+                "connect_timeout",
+            ),
+            idle_timeout=_parse_positive_float(
+                _read_value(data, "idle_timeout", "IDLE_TIMEOUT", default=cls.idle_timeout),
+                "idle_timeout",
+            ),
             max_connect_header_bytes=_parse_positive_int(
                 _read_value(data, "max_connect_header_bytes", "MAX_CONNECT_HEADER_BYTES", default=cls.max_connect_header_bytes),
                 "max_connect_header_bytes",
@@ -223,12 +229,18 @@ class AppConfig:
                 _read_value(data, "max_active_connections", "MAX_ACTIVE_CONNECTIONS", default=cls.max_active_connections),
                 "max_active_connections",
             ),
-            strict_local_only=_parse_bool(_read_value(data, "strict_local_only", "STRICT_LOCAL_ONLY", default=cls.strict_local_only), "strict_local_only"),
+            strict_local_only=_parse_bool(
+                _read_value(data, "strict_local_only", "STRICT_LOCAL_ONLY", default=cls.strict_local_only),
+                "strict_local_only",
+            ),
             require_auth_for_remote_bind=_parse_bool(
                 _read_value(data, "require_auth_for_remote_bind", "REQUIRE_AUTH_FOR_REMOTE_BIND", default=cls.require_auth_for_remote_bind),
                 "require_auth_for_remote_bind",
             ),
-            control_enabled=_parse_bool(_read_value(data, "control_enabled", "CONTROL_ENABLED", default=cls.control_enabled), "control_enabled"),
+            control_enabled=_parse_bool(
+                _read_value(data, "control_enabled", "CONTROL_ENABLED", default=cls.control_enabled),
+                "control_enabled",
+            ),
             control_host=str(_read_value(data, "control_host", "CONTROL_HOST", default=cls.control_host)),
             control_port=_parse_port(_read_value(data, "control_port", "CONTROL_PORT", default=cls.control_port), "control_port"),
             profile=_read_value(data, "profile", "PROFILE", default=None),

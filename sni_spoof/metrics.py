@@ -20,6 +20,7 @@ class RuntimeMetrics:
         self._lock = threading.RLock()
         self._counters: dict[str, int] = {
             "clients_total": 0,
+            "clients_rejected_capacity": 0,
             "connect_requests": 0,
             "connect_rejected": 0,
             "tunnels_established": 0,

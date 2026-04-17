@@ -22,6 +22,7 @@ from .metrics import RuntimeMetrics
 from .network import build_ipv4_filter, configure_keepalive, get_default_interface_ipv4
 from .packets import ClientHelloMaker
 from .policy import ProxyPolicy
+from .relay import RelaySession
 
 
 LOGGER = logging.getLogger(__name__)
@@ -38,7 +39,6 @@ class SpoofingProxy:
             raise ConfigError("could not detect the default IPv4 interface for the target")
         self.filter = build_ipv4_filter(self.interface_ipv4, config.connect_ip)
         self._injector_thread: threading.Thread | None = None
-        self._active_connections = asyncio.Semaphore(config.max_active_connections)
         self._connection_ids = itertools.count(1)
         self._active_count = 0
 
@@ -82,27 +82,47 @@ class SpoofingProxy:
                 incoming_sock, remote_addr = await loop.sock_accept(listen_sock)
                 incoming_sock.setblocking(False)
                 configure_keepalive(incoming_sock)
+                if self._active_count >= self.config.max_active_connections:
+                    LOGGER.warning("Rejecting client %s:%s because capacity is full", remote_addr[0], remote_addr[1])
+                    self.metrics.increment("clients_rejected_capacity")
+                    self.metrics.event("client_rejected_capacity", remote=f"{remote_addr[0]}:{remote_addr[1]}")
+                    self._close_socket(incoming_sock)
+                    continue
                 connection_id = next(self._connection_ids)
-                asyncio.create_task(self._handle_with_limit(connection_id, incoming_sock, remote_addr))
+                self._active_count += 1
+                self.metrics.gauge("active_connections", self._active_count)
+                self.metrics.increment("clients_total")
+                self.metrics.event(
+                    "client_accepted",
+                    connection_id=connection_id,
+                    remote=f"{remote_addr[0]}:{remote_addr[1]}",
+                )
+                task = asyncio.create_task(self._handle_client(connection_id, incoming_sock, remote_addr))
+                task.add_done_callback(self._log_client_task_exit)
         finally:
             listen_sock.close()
 
-    async def _handle_with_limit(self, connection_id: int, incoming_sock: socket.socket, incoming_remote_addr: tuple[str, int]) -> None:
-        async with self._active_connections:
-            self._active_count += 1
+    async def _handle_client(
+        self,
+        connection_id: int,
+        incoming_sock: socket.socket,
+        incoming_remote_addr: tuple[str, int],
+    ) -> None:
+        try:
+            if self.config.proxy_mode == "http_connect":
+                await self.handle_http_connect(connection_id, incoming_sock, incoming_remote_addr)
+            else:
+                await self.handle_raw(connection_id, incoming_sock, incoming_remote_addr)
+        finally:
+            self._active_count -= 1
             self.metrics.gauge("active_connections", self._active_count)
-            self.metrics.increment("clients_total")
-            self.metrics.event("client_accepted", connection_id=connection_id, remote=f"{incoming_remote_addr[0]}:{incoming_remote_addr[1]}")
-            try:
-                if self.config.proxy_mode == "http_connect":
-                    await self.handle_http_connect(connection_id, incoming_sock, incoming_remote_addr)
-                else:
-                    await self.handle_raw(connection_id, incoming_sock, incoming_remote_addr)
-            finally:
-                self._active_count -= 1
-                self.metrics.gauge("active_connections", self._active_count)
 
-    async def handle_raw(self, connection_id: int, incoming_sock: socket.socket, incoming_remote_addr: tuple[str, int]) -> None:
+    async def handle_raw(
+        self,
+        connection_id: int,
+        incoming_sock: socket.socket,
+        incoming_remote_addr: tuple[str, int],
+    ) -> None:
         outgoing_sock: socket.socket | None = None
         try:
             LOGGER.info("[%s] Accepted raw client from %s:%s", connection_id, incoming_remote_addr[0], incoming_remote_addr[1])
@@ -112,16 +132,32 @@ class SpoofingProxy:
             self.metrics.event("raw_tunnel_established", connection_id=connection_id)
             await self._relay_pair(connection_id, incoming_sock, outgoing_sock)
         except Exception as exc:
-            LOGGER.warning("[%s] Raw client %s:%s closed before relay: %s", connection_id, incoming_remote_addr[0], incoming_remote_addr[1], exc)
+            LOGGER.warning(
+                "[%s] Raw client %s:%s closed before relay: %s",
+                connection_id,
+                incoming_remote_addr[0],
+                incoming_remote_addr[1],
+                exc,
+            )
         finally:
             self._close_socket(incoming_sock)
             if outgoing_sock is not None:
                 self._close_socket(outgoing_sock)
 
-    async def handle_http_connect(self, connection_id: int, incoming_sock: socket.socket, incoming_remote_addr: tuple[str, int]) -> None:
+    async def handle_http_connect(
+        self,
+        connection_id: int,
+        incoming_sock: socket.socket,
+        incoming_remote_addr: tuple[str, int],
+    ) -> None:
         outgoing_sock: socket.socket | None = None
         try:
-            LOGGER.info("[%s] Accepted HTTP CONNECT client from %s:%s", connection_id, incoming_remote_addr[0], incoming_remote_addr[1])
+            LOGGER.info(
+                "[%s] Accepted HTTP CONNECT client from %s:%s",
+                connection_id,
+                incoming_remote_addr[0],
+                incoming_remote_addr[1],
+            )
             request = await read_connect_request(
                 incoming_sock,
                 self.config.max_connect_header_bytes,
@@ -143,12 +179,24 @@ class SpoofingProxy:
             self.metrics.event("tunnel_established", connection_id=connection_id, authority=request.authority)
             await self._relay_pair(connection_id, incoming_sock, outgoing_sock, request.leftover)
         except HttpConnectError as exc:
-            LOGGER.warning("[%s] CONNECT rejected from %s:%s: %s", connection_id, incoming_remote_addr[0], incoming_remote_addr[1], exc.detail)
+            LOGGER.warning(
+                "[%s] CONNECT rejected from %s:%s: %s",
+                connection_id,
+                incoming_remote_addr[0],
+                incoming_remote_addr[1],
+                exc.detail,
+            )
             self.metrics.increment("connect_rejected")
             self.metrics.event("connect_rejected", connection_id=connection_id, reason=exc.detail)
             await self._send_http_error(incoming_sock, exc)
         except Exception as exc:
-            LOGGER.warning("[%s] CONNECT client %s:%s closed before relay: %s", connection_id, incoming_remote_addr[0], incoming_remote_addr[1], exc)
+            LOGGER.warning(
+                "[%s] CONNECT client %s:%s closed before relay: %s",
+                connection_id,
+                incoming_remote_addr[0],
+                incoming_remote_addr[1],
+                exc,
+            )
         finally:
             self._close_socket(incoming_sock)
             if outgoing_sock is not None:
@@ -199,7 +247,11 @@ class SpoofingProxy:
             self.registry.remove(connection.id)
             connection.monitor = False
             self.metrics.increment("fake_ack_total")
-            self.metrics.event("fake_ack_received", connection_id=connection_id, upstream=f"{self.config.connect_ip}:{self.config.connect_port}")
+            self.metrics.event(
+                "fake_ack_received",
+                connection_id=connection_id,
+                upstream=f"{self.config.connect_ip}:{self.config.connect_port}",
+            )
             return outgoing_sock
         except Exception as exc:
             self.metrics.increment("upstream_failures")
@@ -223,33 +275,28 @@ class SpoofingProxy:
         raise ConnectionError(f"unexpected injector message: {connection.t2a_msg!r}")
 
     async def _relay_pair(self, connection_id: int, left: socket.socket, right: socket.socket, left_prefix: bytes = b"") -> None:
-        if left_prefix:
-            loop = asyncio.get_running_loop()
-            await loop.sock_sendall(right, left_prefix)
-            self.metrics.add_bytes("bytes_client_to_upstream", len(left_prefix))
-        left_to_right = asyncio.create_task(self._relay(left, right, "bytes_client_to_upstream"))
-        right_to_left = asyncio.create_task(self._relay(right, left, "bytes_upstream_to_client"))
-        done, pending = await asyncio.wait({left_to_right, right_to_left}, return_when=asyncio.FIRST_COMPLETED)
-        for task in pending:
-            task.cancel()
-        for task in done:
-            with suppress(Exception):
-                task.result()
-        LOGGER.info("[%s] Relay finished", connection_id)
+        relay = RelaySession(self.config.recv_buffer_size, self.config.idle_timeout, self._record_relay_bytes)
+        result = await relay.run(left, right, left_prefix)
+        LOGGER.info(
+            "[%s] Relay finished client_to_upstream=%s upstream_to_client=%s",
+            connection_id,
+            result.client_to_upstream,
+            result.upstream_to_client,
+        )
         self.metrics.increment("relay_finished")
-        self.metrics.event("relay_finished", connection_id=connection_id)
+        self.metrics.event(
+            "relay_finished",
+            connection_id=connection_id,
+            client_to_upstream=result.client_to_upstream,
+            upstream_to_client=result.upstream_to_client,
+        )
 
-    async def _relay(self, source: socket.socket, target: socket.socket, byte_counter: str) -> None:
-        loop = asyncio.get_running_loop()
-        while True:
-            try:
-                data = await asyncio.wait_for(loop.sock_recv(source, self.config.recv_buffer_size), timeout=self.config.idle_timeout)
-            except asyncio.TimeoutError:
-                return
-            if not data:
-                return
-            await loop.sock_sendall(target, data)
-            self.metrics.add_bytes(byte_counter, len(data))
+    def _record_relay_bytes(self, direction: str, size: int) -> None:
+        metric_name = {
+            "client_to_upstream": "bytes_client_to_upstream",
+            "upstream_to_client": "bytes_upstream_to_client",
+        }[direction]
+        self.metrics.add_bytes(metric_name, size)
 
     async def _send_http_error(self, sock: socket.socket, exc: HttpConnectError) -> None:
         loop = asyncio.get_running_loop()
@@ -266,6 +313,14 @@ class SpoofingProxy:
         exc = task.exception()
         if exc is not None:
             LOGGER.error("Control server stopped unexpectedly: %s", exc)
+
+    @staticmethod
+    def _log_client_task_exit(task: asyncio.Task) -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            LOGGER.error("Client task stopped unexpectedly: %s", exc)
 
     @staticmethod
     def _close_socket(sock: socket.socket) -> None:
