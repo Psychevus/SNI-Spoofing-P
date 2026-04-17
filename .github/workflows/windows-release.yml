@@ -1,0 +1,123 @@
+name: Windows Release Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/windows-release.yml"
+      - "config.json"
+      - "main.py"
+      - "packaging/**"
+      - "pyproject.toml"
+      - "requirements*.txt"
+      - "sni-spoofing-proxy.spec"
+      - "sni_spoof/**"
+      - "tests/**"
+      - "tools/**"
+      - "README.md"
+      - "THIRD_PARTY_NOTICES.md"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    name: Build Windows x64 bundle
+    runs-on: windows-2022
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-build.txt
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-build.txt
+
+      - name: Build release bundle
+        shell: pwsh
+        run: python tools\build_release.py
+
+      - name: Smoke test packaged executable
+        shell: pwsh
+        run: |
+          $releaseDir = Get-ChildItem -Path dist -Directory -Filter "sni-spoofing-proxy-*-windows-x64" | Select-Object -First 1
+          if (-not $releaseDir) {
+            throw "Release directory was not created."
+          }
+
+          & (Join-Path $releaseDir.FullName "sni-spoof.exe") --dry-run
+          python -m zipfile --test "$($releaseDir.FullName).zip"
+          Get-Content "$($releaseDir.FullName).zip.sha256"
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sni-spoofing-proxy-windows-x64
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            dist/sni-spoofing-proxy-*-windows-x64.zip
+            dist/sni-spoofing-proxy-*-windows-x64.zip.sha256
+
+  publish-draft-release:
+    name: Publish draft release assets
+    needs: build-windows
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sni-spoofing-proxy-windows-x64
+          path: release-assets
+
+      - name: Create or update draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! compgen -G "release-assets/*" > /dev/null; then
+            echo "No release assets found." >&2
+            exit 1
+          fi
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists; updating assets."
+          else
+            gh release create "$RELEASE_TAG" \
+              --draft \
+              --title "$RELEASE_TAG" \
+              --notes "Automated Windows release build for $RELEASE_TAG."
+          fi
+
+          for asset in release-assets/*; do
+            gh release upload "$RELEASE_TAG" "$asset" --clobber
+          done

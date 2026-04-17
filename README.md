@@ -20,7 +20,7 @@ The project is designed to make SNI injection experiments easier to run, easier 
 ## Requirements
 
 - Windows 10 or newer.
-- Python 3.10 or newer.
+- Python 3.11 or newer.
 - Administrator PowerShell for WinDivert packet capture and injection.
 - Dependencies from `requirements.txt`.
 - A target endpoint you are authorized to test.
@@ -32,11 +32,20 @@ The injector depends on WinDivert through `pydivert`. Without administrator priv
 Open PowerShell as Administrator:
 
 ```powershell
-cd D:\Projects\SNI-Spoofing-P
-python -m venv .venv
+git clone https://github.com/YOUR-USER/YOUR-REPO.git
+cd YOUR-REPO
+py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+```
+
+The examples below use `example.com` and `93.184.216.34` as placeholders. Replace them with the hostname and endpoint you are authorized to test.
+
+Configure the target route:
+
+```powershell
+python main.py wizard
 ```
 
 Run environment checks:
@@ -54,14 +63,14 @@ python main.py run --log-level DEBUG
 In another terminal, send traffic through the local proxy:
 
 ```powershell
-curl.exe -vk -x http://127.0.0.1:8080 https://auth.vercel.com/
+curl.exe -vk -x http://127.0.0.1:8080 https://example.com/
 ```
 
 For a direct raw TCP listener instead of HTTP CONNECT:
 
 ```powershell
 python main.py run --listen-host 127.0.0.1 --listen-port 40443 --proxy-mode raw
-curl.exe -vk --connect-to auth.vercel.com:443:127.0.0.1:40443 https://auth.vercel.com/
+curl.exe -vk --connect-to example.com:443:127.0.0.1:40443 https://example.com/
 ```
 
 ## Browser Workflow
@@ -69,7 +78,7 @@ curl.exe -vk --connect-to auth.vercel.com:443:127.0.0.1:40443 https://auth.verce
 The simplest browser workflow is to launch an isolated browser profile with the proxy already configured:
 
 ```powershell
-python main.py launch-browser --browser edge --browser-url https://auth.vercel.com/
+python main.py launch-browser --browser edge --browser-url https://example.com/
 ```
 
 You can also configure a browser manually with the PAC URL:
@@ -118,8 +127,8 @@ Keep the control server on loopback unless you have a specific operational reaso
 Global options can be combined with commands. For example:
 
 ```powershell
-python main.py --profile vercel-auth --log-level DEBUG run
-python main.py --connect-ip 188.114.98.0 --fake-sni auth.vercel.com --dry-run
+python main.py --profile example-route --log-level DEBUG run
+python main.py --connect-ip 93.184.216.34 --fake-sni example.com --allowed-host example.com --dry-run
 ```
 
 ## Configuration
@@ -131,10 +140,10 @@ Runtime defaults live in `config.json` and can be overridden with CLI flags. A c
   "LISTEN_HOST": "127.0.0.1",
   "LISTEN_PORT": 8080,
   "PROXY_MODE": "http_connect",
-  "CONNECT_IP": "188.114.98.0",
+  "CONNECT_IP": "93.184.216.34",
   "CONNECT_PORT": 443,
-  "FAKE_SNI": "auth.vercel.com",
-  "ALLOWED_HOSTS": ["auth.vercel.com"],
+  "FAKE_SNI": "example.com",
+  "ALLOWED_HOSTS": ["example.com"],
   "ALLOWED_PORTS": [443],
   "STRICT_LOCAL_ONLY": true,
   "CONTROL_ENABLED": true,
@@ -142,11 +151,11 @@ Runtime defaults live in `config.json` and can be overridden with CLI flags. A c
   "CONTROL_PORT": 9090,
   "LOG_LEVEL": "INFO",
   "PROFILES": {
-    "vercel-auth": {
-      "CONNECT_IP": "188.114.98.0",
+    "example-route": {
+      "CONNECT_IP": "93.184.216.34",
       "CONNECT_PORT": 443,
-      "FAKE_SNI": "auth.vercel.com",
-      "ALLOWED_HOSTS": ["auth.vercel.com"],
+      "FAKE_SNI": "example.com",
+      "ALLOWED_HOSTS": ["example.com"],
       "ALLOWED_PORTS": [443]
     }
   }
@@ -166,14 +175,14 @@ Profiles make target switching predictable and repeatable:
 
 ```powershell
 python main.py profiles
-python main.py profiles --show-profile vercel-auth
-python main.py --profile vercel-auth run
+python main.py profiles --show-profile example-route
+python main.py --profile example-route run
 ```
 
 Save the current command-line configuration as a profile:
 
 ```powershell
-python main.py --connect-ip 188.114.98.0 --fake-sni auth.vercel.com profiles --save-profile vercel-auth
+python main.py --connect-ip 93.184.216.34 --fake-sni example.com --allowed-host example.com profiles --save-profile example-route
 ```
 
 ## Security Model
@@ -257,8 +266,8 @@ python -m pip install -r requirements.txt
 Make sure the client is actually routed through the proxy. Use one of these:
 
 ```powershell
-curl.exe -vk -x http://127.0.0.1:8080 https://auth.vercel.com/
-python main.py launch-browser --browser edge --browser-url https://auth.vercel.com/
+curl.exe -vk -x http://127.0.0.1:8080 https://example.com/
+python main.py launch-browser --browser edge --browser-url https://example.com/
 ```
 
 ### The fake payload is not acknowledged
@@ -293,6 +302,58 @@ Validate configuration without starting the injector:
 ```powershell
 python main.py --dry-run
 ```
+
+## Release Build
+
+Install build dependencies inside the virtual environment:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements-build.txt
+```
+
+Build a release-ready Windows bundle:
+
+```powershell
+python tools\build_release.py
+```
+
+The builder runs tests, validates `--dry-run`, creates a PyInstaller one-folder executable, copies `config.json`, `README.md`, `LICENSE`, third-party notices, available third-party license files, writes `RELEASE_MANIFEST.json`, generates `SHA256SUMS.txt`, and creates a ZIP archive under `dist\`.
+
+Expected outputs:
+
+```text
+dist\sni-spoofing-proxy-<version>-windows-x64\
+dist\sni-spoofing-proxy-<version>-windows-x64.zip
+dist\sni-spoofing-proxy-<version>-windows-x64.zip.sha256
+```
+
+Run the packaged executable from the release folder:
+
+```powershell
+cd dist\sni-spoofing-proxy-<version>-windows-x64
+.\sni-spoof.exe --dry-run
+.\sni-spoof.exe run --log-level DEBUG
+```
+
+Use an Administrator PowerShell for `run` because WinDivert requires elevated privileges. The bundle also includes `Start-SNI-Spoof-Admin.cmd` for a quick UAC-assisted launch while keeping normal console behavior for `--help`, `--dry-run`, `doctor`, `pac`, and profile commands.
+
+### GitHub Actions
+
+The repository includes a Windows release workflow at `.github/workflows/windows-release.yml`.
+
+- Pull requests and pushes to `main` build the Windows x64 ZIP and upload it as a workflow artifact.
+- Manual runs are available from the GitHub Actions tab through `workflow_dispatch`.
+- Version tags such as `vX.Y.Z` build the same artifact and attach the ZIP plus `.sha256` file to a draft GitHub Release.
+
+To publish a release from CI:
+
+```powershell
+git tag vX.Y.Z
+git push origin vX.Y.Z
+```
+
+Review the generated draft release in GitHub before publishing it.
 
 ## Packaging
 
