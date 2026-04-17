@@ -3,5 +3,11 @@
   "LISTEN_PORT": 40443,
   "CONNECT_IP": "188.114.98.0",
   "CONNECT_PORT": 443,
-  "FAKE_SNI": "auth.vercel.com"
+  "FAKE_SNI": "auth.vercel.com",
+  "BYPASS_METHOD": "wrong_seq",
+  "DATA_MODE": "tls",
+  "HANDSHAKE_TIMEOUT": 2.0,
+  "RECV_BUFFER_SIZE": 65575,
+  "BACKLOG": 128,
+  "LOG_LEVEL": "INFO"
 }
