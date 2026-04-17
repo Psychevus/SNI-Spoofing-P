@@ -20,5 +20,24 @@
   "BACKLOG": 128,
   "MAX_CONNECT_HEADER_BYTES": 16384,
   "MAX_ACTIVE_CONNECTIONS": 256,
-  "LOG_LEVEL": "INFO"
+  "STRICT_LOCAL_ONLY": true,
+  "REQUIRE_AUTH_FOR_REMOTE_BIND": true,
+  "CONTROL_ENABLED": true,
+  "CONTROL_HOST": "127.0.0.1",
+  "CONTROL_PORT": 9090,
+  "LOG_LEVEL": "INFO",
+  "LOG_FORMAT": "text",
+  "PROFILES": {
+    "vercel-auth": {
+      "CONNECT_IP": "188.114.98.0",
+      "CONNECT_PORT": 443,
+      "FAKE_SNI": "auth.vercel.com",
+      "ALLOWED_HOSTS": [
+        "auth.vercel.com"
+      ],
+      "ALLOWED_PORTS": [
+        443
+      ]
+    }
+  }
 }

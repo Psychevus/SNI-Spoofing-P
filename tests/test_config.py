@@ -1,4 +1,6 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from sni_spoof.config import AppConfig, ConfigError, normalize_sni
 
@@ -39,6 +41,40 @@ class ConfigTests(unittest.TestCase):
         config = AppConfig.from_mapping({"PROXY_MODE": "raw"})
 
         self.assertEqual(config.proxy_mode, "raw")
+
+    def test_strict_local_only_rejects_remote_bind(self):
+        with self.assertRaises(ConfigError):
+            AppConfig.from_mapping({"LISTEN_HOST": "0.0.0.0"})
+
+    def test_json_log_format_is_allowed(self):
+        config = AppConfig.from_mapping({"LOG_FORMAT": "json"})
+
+        self.assertEqual(config.log_format, "json")
+
+    def test_named_profile_overrides_base_config(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            path.write_text(
+                """
+{
+  "FAKE_SNI": "base.example",
+  "ALLOWED_HOSTS": ["base.example"],
+  "PROFILES": {
+    "demo": {
+      "FAKE_SNI": "profile.example",
+      "ALLOWED_HOSTS": ["profile.example"]
+    }
+  }
+}
+""",
+                encoding="utf-8",
+            )
+
+            config = AppConfig.load(path, "demo")
+
+        self.assertEqual(config.profile, "demo")
+        self.assertEqual(config.fake_sni, "profile.example")
+        self.assertEqual(config.allowed_hosts, ("profile.example",))
 
 
 if __name__ == "__main__":

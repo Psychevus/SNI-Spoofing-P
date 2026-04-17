@@ -69,6 +69,18 @@ def _parse_positive_int(value: Any, field_name: str) -> int:
     return parsed
 
 
+def _parse_bool(value: Any, field_name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    raise ConfigError(f"{field_name} must be a boolean")
+
+
 def normalize_sni(value: str) -> bytes:
     if not isinstance(value, str):
         raise ConfigError("fake_sni must be a string")
@@ -126,6 +138,7 @@ class AppConfig:
     recv_buffer_size: int = 65575
     backlog: int = 128
     log_level: str = "INFO"
+    log_format: str = "text"
     proxy_mode: str = "http_connect"
     allowed_hosts: tuple[str, ...] = ("auth.vercel.com",)
     allowed_ports: tuple[int, ...] = (443,)
@@ -134,9 +147,15 @@ class AppConfig:
     idle_timeout: float = 300.0
     max_connect_header_bytes: int = 16384
     max_active_connections: int = 256
+    strict_local_only: bool = True
+    require_auth_for_remote_bind: bool = True
+    control_enabled: bool = True
+    control_host: str = "127.0.0.1"
+    control_port: int = 9090
+    profile: str | None = None
 
     @classmethod
-    def load(cls, path: str | Path) -> "AppConfig":
+    def load(cls, path: str | Path, profile: str | None = None) -> "AppConfig":
         config_path = Path(path)
         try:
             with config_path.open("r", encoding="utf-8") as fh:
@@ -148,7 +167,24 @@ class AppConfig:
 
         if not isinstance(raw, dict):
             raise ConfigError("config root must be a JSON object")
+        if profile:
+            raw = cls._apply_profile(raw, profile)
         return cls.from_mapping(raw)
+
+    @classmethod
+    def _apply_profile(cls, raw: Mapping[str, Any], profile: str) -> dict[str, Any]:
+        profiles = _read_value(raw, "profiles", "PROFILES", default={})
+        if not isinstance(profiles, Mapping):
+            raise ConfigError("profiles must be a JSON object")
+        selected = profiles.get(profile)
+        if selected is None:
+            raise ConfigError(f"profile not found: {profile}")
+        if not isinstance(selected, Mapping):
+            raise ConfigError(f"profile must be a JSON object: {profile}")
+        merged = {key: value for key, value in raw.items() if key not in {"profiles", "PROFILES"}}
+        merged.update(selected)
+        merged["profile"] = profile
+        return merged
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> "AppConfig":
@@ -172,6 +208,7 @@ class AppConfig:
             recv_buffer_size=int(_read_value(data, "recv_buffer_size", "RECV_BUFFER_SIZE", default=cls.recv_buffer_size)),
             backlog=int(_read_value(data, "backlog", "BACKLOG", default=cls.backlog)),
             log_level=str(_read_value(data, "log_level", "LOG_LEVEL", default=cls.log_level)).upper(),
+            log_format=str(_read_value(data, "log_format", "LOG_FORMAT", default=cls.log_format)).lower(),
             proxy_mode=str(_read_value(data, "proxy_mode", "PROXY_MODE", default=cls.proxy_mode)).lower().replace("-", "_"),
             allowed_hosts=allowed_hosts,
             allowed_ports=allowed_ports,
@@ -186,6 +223,15 @@ class AppConfig:
                 _read_value(data, "max_active_connections", "MAX_ACTIVE_CONNECTIONS", default=cls.max_active_connections),
                 "max_active_connections",
             ),
+            strict_local_only=_parse_bool(_read_value(data, "strict_local_only", "STRICT_LOCAL_ONLY", default=cls.strict_local_only), "strict_local_only"),
+            require_auth_for_remote_bind=_parse_bool(
+                _read_value(data, "require_auth_for_remote_bind", "REQUIRE_AUTH_FOR_REMOTE_BIND", default=cls.require_auth_for_remote_bind),
+                "require_auth_for_remote_bind",
+            ),
+            control_enabled=_parse_bool(_read_value(data, "control_enabled", "CONTROL_ENABLED", default=cls.control_enabled), "control_enabled"),
+            control_host=str(_read_value(data, "control_host", "CONTROL_HOST", default=cls.control_host)),
+            control_port=_parse_port(_read_value(data, "control_port", "CONTROL_PORT", default=cls.control_port), "control_port"),
+            profile=_read_value(data, "profile", "PROFILE", default=None),
         )
         cfg.validate()
         return cfg
@@ -200,6 +246,8 @@ class AppConfig:
             clean["allowed_ports"] = _parse_port_list(clean["allowed_ports"], "allowed_ports")
         if "log_level" in clean:
             clean["log_level"] = str(clean["log_level"]).upper()
+        if "log_format" in clean:
+            clean["log_format"] = str(clean["log_format"]).lower()
         cfg = replace(self, **clean)
         cfg.validate()
         return cfg
@@ -219,6 +267,20 @@ class AppConfig:
                 ipaddress.IPv4Address(self.interface_ipv4)
             except ValueError as exc:
                 raise ConfigError("interface_ipv4 must be a valid IPv4 address") from exc
+        try:
+            listen_ip = ipaddress.ip_address(self.listen_host)
+        except ValueError as exc:
+            raise ConfigError("listen_host must be an IP address") from exc
+        try:
+            control_ip = ipaddress.ip_address(self.control_host)
+        except ValueError as exc:
+            raise ConfigError("control_host must be an IP address") from exc
+        if self.strict_local_only and not listen_ip.is_loopback:
+            raise ConfigError("strict_local_only requires listen_host to be a loopback address")
+        if self.control_enabled and not control_ip.is_loopback:
+            raise ConfigError("control server must bind to a loopback address")
+        if self.require_auth_for_remote_bind and self.proxy_mode == "http_connect" and not listen_ip.is_loopback and not self.auth_token:
+            raise ConfigError("remote http_connect binding requires auth_token")
 
         if self.bypass_method != "wrong_seq":
             raise ConfigError("only the 'wrong_seq' bypass method is currently implemented")
@@ -242,6 +304,8 @@ class AppConfig:
             raise ConfigError("max_active_connections must be between 1 and 10000")
         if not isinstance(getattr(logging, self.log_level, None), int):
             raise ConfigError("log_level must be a valid Python logging level")
+        if self.log_format not in {"text", "json"}:
+            raise ConfigError("log_format must be either 'text' or 'json'")
         if self.proxy_mode == "http_connect" and not self.allowed_hosts:
             raise ConfigError("allowed_hosts must not be empty when proxy_mode is 'http_connect'")
         if not self.allowed_ports:
@@ -266,6 +330,8 @@ class AppConfig:
                 warnings.append("http_connect mode is reachable from all interfaces without proxy authentication.")
         if self.proxy_mode == "http_connect" and "*" in self.allowed_hosts:
             warnings.append("allowed_hosts contains '*'; this can turn the service into a broad forwarding proxy.")
+        if self.control_enabled and self.control_port == self.listen_port and self.control_host == self.listen_host:
+            warnings.append("control server uses the same endpoint as the proxy listener.")
         if target_ip.is_private or target_ip.is_loopback or target_ip.is_multicast or target_ip.is_unspecified:
             warnings.append("connect_ip is not a normal public unicast address; confirm this is intentional.")
         if self.connect_port != 443:
@@ -277,6 +343,7 @@ class AppConfig:
     def public_summary(self) -> dict[str, Any]:
         return {
             "listen": f"{self.listen_host}:{self.listen_port}",
+            "profile": self.profile or "default",
             "proxy_mode": self.proxy_mode,
             "target": f"{self.connect_ip}:{self.connect_port}",
             "fake_sni": self.fake_sni,
@@ -293,5 +360,10 @@ class AppConfig:
             "backlog": self.backlog,
             "max_connect_header_bytes": self.max_connect_header_bytes,
             "max_active_connections": self.max_active_connections,
+            "strict_local_only": self.strict_local_only,
+            "require_auth_for_remote_bind": self.require_auth_for_remote_bind,
+            "control_enabled": self.control_enabled,
+            "control": f"{self.control_host}:{self.control_port}" if self.control_enabled else "disabled",
             "log_level": self.log_level,
+            "log_format": self.log_format,
         }

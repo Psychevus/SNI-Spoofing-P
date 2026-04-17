@@ -16,6 +16,13 @@ Install dependencies:
 python -m pip install -r requirements.txt
 ```
 
+For editable package usage:
+
+```powershell
+python -m pip install -e .
+sni-spoof --dry-run
+```
+
 ## Configuration
 
 Edit `config.json` or override values from the command line.
@@ -43,11 +50,17 @@ Edit `config.json` or override values from the command line.
   "BACKLOG": 128,
   "MAX_CONNECT_HEADER_BYTES": 16384,
   "MAX_ACTIVE_CONNECTIONS": 256,
-  "LOG_LEVEL": "INFO"
+  "STRICT_LOCAL_ONLY": true,
+  "REQUIRE_AUTH_FOR_REMOTE_BIND": true,
+  "CONTROL_ENABLED": true,
+  "CONTROL_HOST": "127.0.0.1",
+  "CONTROL_PORT": 9090,
+  "LOG_LEVEL": "INFO",
+  "LOG_FORMAT": "text"
 }
 ```
 
-Security note: prefer `127.0.0.1` for `LISTEN_HOST` unless remote clients must connect to this proxy.
+Security note: the default configuration is local-only. To bind outside loopback, disable `STRICT_LOCAL_ONLY` and set `AUTH_TOKEN`.
 
 ## Usage
 
@@ -60,7 +73,7 @@ python main.py --dry-run
 Run the proxy:
 
 ```powershell
-python main.py
+python main.py run
 ```
 
 Override common settings:
@@ -74,6 +87,36 @@ The module entry point is also available:
 ```powershell
 python -m sni_spoof --dry-run
 ```
+
+## Commands
+
+Run environment diagnostics:
+
+```powershell
+python main.py doctor
+```
+
+Generate a PAC file:
+
+```powershell
+python main.py pac --pac-output proxy.pac
+```
+
+Test a running proxy tunnel:
+
+```powershell
+python main.py test-tunnel --test-host auth.vercel.com
+```
+
+The default command is `run`, so `python main.py` and `python main.py run` are equivalent.
+
+Use a named profile from `config.json`:
+
+```powershell
+python main.py run --profile vercel-auth
+```
+
+Profiles live under `PROFILES` and override the base configuration for a specific route or deployment target.
 
 ## HTTP CONNECT Mode
 
@@ -97,6 +140,19 @@ Configure browser HTTPS proxy settings to:
 
 - Host: `127.0.0.1`
 - Port: `8080`
+
+The local dashboard is available while the proxy is running:
+
+- Dashboard: `http://127.0.0.1:9090/`
+- Health: `http://127.0.0.1:9090/health`
+- Metrics: `http://127.0.0.1:9090/metrics`
+- PAC: `http://127.0.0.1:9090/proxy.pac`
+
+For browser auto-configuration, use this PAC URL:
+
+```text
+http://127.0.0.1:9090/proxy.pac
+```
 
 `ALLOWED_HOSTS` and `ALLOWED_PORTS` are enforced before a tunnel is opened. This prevents the service from becoming a broad local forwarding proxy by accident.
 
@@ -134,12 +190,24 @@ For deeper packet-level diagnostics:
 python main.py --log-level DEBUG
 ```
 
+For structured logs:
+
+```powershell
+python main.py --log-format json
+```
+
 ## Architecture
 
 - `sni_spoof.config` loads legacy and modern JSON keys, validates values, and reports security warnings.
 - `sni_spoof.cli` provides the command-line interface and dry-run mode.
+- `sni_spoof.control` serves the local dashboard, health endpoint, metrics, and PAC file.
+- `sni_spoof.doctor` checks runtime prerequisites and common environment problems.
 - `sni_spoof.http_connect` parses and validates HTTP CONNECT requests.
+- `sni_spoof.metrics` records counters, active connections, traffic volume, and recent events.
+- `sni_spoof.pac` generates browser proxy auto-configuration.
+- `sni_spoof.policy` enforces host and port access policy.
 - `sni_spoof.proxy` owns socket lifecycle, connection setup, fake handshake waiting, and bidirectional relay.
+- `sni_spoof.selftest` verifies a running HTTP CONNECT tunnel end to end.
 - `sni_spoof.injector` owns WinDivert packet processing and connection tracking.
 - `sni_spoof.packets` builds and validates supported TLS packet templates.
 - Legacy root modules remain as compatibility wrappers.
@@ -154,9 +222,13 @@ The application validates:
 - SNI hostname shape and IDNA normalization
 - HTTP CONNECT host and port allowlists
 - optional proxy authentication token
+- strict local-only binding by default
+- required auth token for remote HTTP CONNECT binding
+- loopback-only control dashboard binding
 - CONNECT header size limits
 - upstream connect and tunnel idle timeouts
 - maximum active connection count
+- text and JSON log formats
 - supported data mode and bypass method
 - relay buffer and backlog limits
 
