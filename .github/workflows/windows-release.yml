@@ -108,6 +108,7 @@ jobs:
       - name: Create or update draft release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
         shell: bash
         run: |
@@ -122,12 +123,13 @@ jobs:
           echo "Publishing assets for tag: $RELEASE_TAG"
           gh auth status
 
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+          if gh release view "$RELEASE_TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
             echo "Release $RELEASE_TAG already exists; updating assets."
           else
             echo "Creating draft release $RELEASE_TAG."
             set +e
             create_output="$(gh release create "$RELEASE_TAG" \
+              --repo "$GH_REPO" \
               --draft \
               --title "$RELEASE_TAG" \
               --notes "Automated Windows release build for $RELEASE_TAG." 2>&1)"
@@ -146,5 +148,5 @@ jobs:
 
           for asset in "${assets[@]}"; do
             echo "Uploading $asset"
-            gh release upload "$RELEASE_TAG" "$asset" --clobber
+            gh release upload "$RELEASE_TAG" "$asset" --repo "$GH_REPO" --clobber
           done
