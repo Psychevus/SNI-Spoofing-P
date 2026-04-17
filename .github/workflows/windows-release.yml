@@ -27,6 +27,9 @@ on:
 permissions:
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 concurrency:
   group: windows-release-${{ github.ref }}
   cancel-in-progress: true
@@ -96,6 +99,12 @@ jobs:
           name: sni-spoofing-proxy-windows-x64
           path: release-assets
 
+      - name: List release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          find release-assets -maxdepth 1 -type f -print -exec sha256sum {} \;
+
       - name: Create or update draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -104,20 +113,38 @@ jobs:
         run: |
           set -euo pipefail
 
-          if ! compgen -G "release-assets/*" > /dev/null; then
+          mapfile -t assets < <(find release-assets -maxdepth 1 -type f | sort)
+          if [ "${#assets[@]}" -eq 0 ]; then
             echo "No release assets found." >&2
             exit 1
           fi
 
+          echo "Publishing assets for tag: $RELEASE_TAG"
+          gh auth status
+
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             echo "Release $RELEASE_TAG already exists; updating assets."
           else
-            gh release create "$RELEASE_TAG" \
+            echo "Creating draft release $RELEASE_TAG."
+            set +e
+            create_output="$(gh release create "$RELEASE_TAG" \
               --draft \
               --title "$RELEASE_TAG" \
-              --notes "Automated Windows release build for $RELEASE_TAG."
+              --notes "Automated Windows release build for $RELEASE_TAG." 2>&1)"
+            create_status=$?
+            set -e
+
+            if [ "$create_status" -ne 0 ]; then
+              echo "$create_output"
+              if echo "$create_output" | grep -Eiq "already_exists|already exists"; then
+                echo "Release already exists; continuing with asset upload."
+              else
+                exit "$create_status"
+              fi
+            fi
           fi
 
-          for asset in release-assets/*; do
+          for asset in "${assets[@]}"; do
+            echo "Uploading $asset"
             gh release upload "$RELEASE_TAG" "$asset" --clobber
           done
