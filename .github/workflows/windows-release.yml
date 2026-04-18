@@ -83,8 +83,8 @@ jobs:
             dist/sni-spoofing-proxy-*-windows-x64.zip
             dist/sni-spoofing-proxy-*-windows-x64.zip.sha256
 
-  publish-draft-release:
-    name: Publish draft release assets
+  publish-release:
+    name: Publish release assets
     needs: build-windows
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -105,7 +105,7 @@ jobs:
           set -euo pipefail
           find release-assets -maxdepth 1 -type f -print -exec sha256sum {} \;
 
-      - name: Create or update draft release
+      - name: Create or update release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -126,11 +126,10 @@ jobs:
           if gh release view "$RELEASE_TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
             echo "Release $RELEASE_TAG already exists; updating assets."
           else
-            echo "Creating draft release $RELEASE_TAG."
+            echo "Creating release $RELEASE_TAG."
             set +e
             create_output="$(gh release create "$RELEASE_TAG" \
               --repo "$GH_REPO" \
-              --draft \
               --title "$RELEASE_TAG" \
               --notes "Automated Windows release build for $RELEASE_TAG." 2>&1)"
             create_status=$?
@@ -150,3 +149,5 @@ jobs:
             echo "Uploading $asset"
             gh release upload "$RELEASE_TAG" "$asset" --repo "$GH_REPO" --clobber
           done
+
+          gh release edit "$RELEASE_TAG" --repo "$GH_REPO" --draft=false

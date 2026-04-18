@@ -1,0 +1,36 @@
+name: Publish Draft Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Draft release tag to publish, for example v0.3.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  publish:
+    name: Publish draft release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Publish draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Publishing draft release: $RELEASE_TAG"
+          gh release view "$RELEASE_TAG" --repo "$GH_REPO"
+          gh release edit "$RELEASE_TAG" --repo "$GH_REPO" --draft=false
+          gh release view "$RELEASE_TAG" --repo "$GH_REPO"
