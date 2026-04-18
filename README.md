@@ -13,6 +13,7 @@ The project is designed to make SNI injection experiments easier to run, easier 
 - Profile system for switching targets without editing code.
 - Interactive setup wizard for first-time configuration.
 - Doctor checks for Windows, administrator rights, Python packages, config validity, and network reachability.
+- Integrated route scanner with readiness scoring, security checks, PAC validation, and optional live DNS/TCP/TLS probes.
 - Local dashboard with health, metrics, event stream, and PAC endpoint.
 - Strict security defaults: loopback binding, host allowlists, port controls, and optional remote-bind authentication.
 - Focused test suite for configuration, tunnel behavior, policy checks, browser launch helpers, and relay flow.
@@ -52,6 +53,13 @@ Run environment checks:
 
 ```powershell
 python main.py doctor
+```
+
+Scan the route before starting the proxy:
+
+```powershell
+python main.py scan --scan-offline
+python main.py scan --scan-format json
 ```
 
 Start the proxy:
@@ -115,6 +123,7 @@ Keep the control server on loopback unless you have a specific operational reaso
 | --- | --- |
 | `python main.py run` | Start the proxy and injector |
 | `python main.py doctor` | Validate runtime, permissions, packages, config, and network reachability |
+| `python main.py scan` | Score the configured route with security, policy, PAC, DNS, TCP, and TLS checks |
 | `python main.py wizard` | Create or update configuration interactively |
 | `python main.py profiles` | List available profiles |
 | `python main.py profiles --show-profile <name>` | Inspect a profile |
@@ -245,6 +254,38 @@ curl.exe http://127.0.0.1:9090/health
 curl.exe http://127.0.0.1:9090/metrics
 curl.exe http://127.0.0.1:9090/events
 ```
+
+## Route Scanner
+
+The route scanner is a safe preflight tool for the configured route. It does not sweep networks, run exploit checks, or call external scanners. By default it only probes the configured endpoint and configured hostnames.
+
+Run a full route scan:
+
+```powershell
+python main.py scan
+```
+
+Run without live network probes:
+
+```powershell
+python main.py scan --scan-offline
+```
+
+Produce machine-readable output:
+
+```powershell
+python main.py scan --scan-format json
+```
+
+The scanner reports:
+
+- configuration validity
+- listener and dashboard exposure
+- allowlist and auth posture
+- SNI and CONNECT policy alignment
+- PAC generation fingerprint
+- ClientHello template readiness
+- optional DNS, target TCP, target TLS, and local port availability
 
 ## Troubleshooting
 

@@ -19,6 +19,7 @@ from .doctor import format_checks, has_failures, run_doctor
 from .logging_utils import configure_logging
 from .pac import generate_pac
 from .proxy import SpoofingProxy
+from .route_scanner import format_route_scan, has_scan_failures, route_scan_to_json, run_route_scan
 from .selftest import test_tunnel
 from .wizard import run_wizard
 
@@ -37,7 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=("run", "doctor", "test-tunnel", "pac", "wizard", "profiles", "launch-browser"),
+        choices=("run", "doctor", "test-tunnel", "pac", "wizard", "profiles", "launch-browser", "scan"),
         default="run",
         help="Command to run.",
     )
@@ -114,6 +115,9 @@ def build_parser() -> argparse.ArgumentParser:
         default="pac",
         help="Use PAC or direct proxy server arguments for browser launch.",
     )
+    parser.add_argument("--scan-format", choices=("text", "json"), default="text", help="Route scanner output format.")
+    parser.add_argument("--scan-offline", action="store_true", help="Skip live DNS, TCP, TLS, and local bind probes.")
+    parser.add_argument("--scan-timeout", type=float, help="Seconds to wait for each live scanner probe.")
     return parser
 
 
@@ -213,6 +217,14 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(pac, end="")
             return 0
+
+        if args.command == "scan":
+            report = run_route_scan(config, network=not args.scan_offline, timeout=args.scan_timeout)
+            if args.scan_format == "json":
+                print(route_scan_to_json(report))
+            else:
+                print(format_route_scan(report))
+            return 1 if has_scan_failures(report) else 0
 
         if args.command == "launch-browser":
             plan = build_launch_plan(
