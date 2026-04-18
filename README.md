@@ -33,15 +33,15 @@ The injector depends on WinDivert through `pydivert`. Without administrator priv
 Open PowerShell as Administrator:
 
 ```powershell
-git clone https://github.com/YOUR-USER/YOUR-REPO.git
-cd YOUR-REPO
+git clone https://github.com/Psychevus/SNI-Spoofing-P.git
+cd SNI-Spoofing-P
 py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-The examples below use `example.com` and `93.184.216.34` as placeholders. Replace them with the hostname and endpoint you are authorized to test.
+Use the wizard for real targets. The `example.com` route below is only a documentation example.
 
 Configure the target route:
 
@@ -126,9 +126,9 @@ Keep the control server on loopback unless you have a specific operational reaso
 | `python main.py scan` | Score the configured route with security, policy, PAC, DNS, TCP, and TLS checks |
 | `python main.py wizard` | Create or update configuration interactively |
 | `python main.py profiles` | List available profiles |
-| `python main.py profiles --show-profile <name>` | Inspect a profile |
-| `python main.py profiles --save-profile <name>` | Save current runtime options as a profile |
-| `python main.py profiles --delete-profile <name>` | Remove a profile |
+| `python main.py profiles --show-profile example-route` | Inspect one profile |
+| `python main.py profiles --save-profile example-route` | Save current runtime options as a profile |
+| `python main.py profiles --delete-profile example-route` | Remove a profile |
 | `python main.py pac` | Print the generated PAC file |
 | `python main.py test-tunnel` | Run a local tunnel smoke test |
 | `python main.py launch-browser` | Launch a browser with an isolated proxy profile |
@@ -346,55 +346,27 @@ python main.py --dry-run
 
 ## Release Build
 
-Install build dependencies inside the virtual environment:
+Download the latest Windows ZIP from [GitHub Releases](https://github.com/Psychevus/SNI-Spoofing-P/releases), extract it, and run the executable from inside the extracted folder:
+
+```powershell
+.\sni-spoof.exe --dry-run
+.\sni-spoof.exe scan --scan-offline
+.\sni-spoof.exe run --log-level DEBUG
+```
+
+Use an Administrator PowerShell for `run` because WinDivert requires elevated privileges. The bundle also includes `Start-SNI-Spoof-Admin.cmd` for a quick UAC-assisted launch while keeping normal console behavior for `--help`, `--dry-run`, `doctor`, `scan`, `pac`, and profile commands.
+
+For development packaging checks, build the same bundle locally:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements-build.txt
-```
-
-Build a release-ready Windows bundle:
-
-```powershell
 python tools\build_release.py
 ```
 
 The builder runs tests, validates `--dry-run`, creates a PyInstaller one-folder executable, copies `config.json`, `README.md`, `LICENSE`, third-party notices, available third-party license files, writes `RELEASE_MANIFEST.json`, generates `SHA256SUMS.txt`, and creates a ZIP archive under `dist\`.
 
-Expected outputs:
-
-```text
-dist\sni-spoofing-proxy-<version>-windows-x64\
-dist\sni-spoofing-proxy-<version>-windows-x64.zip
-dist\sni-spoofing-proxy-<version>-windows-x64.zip.sha256
-```
-
-Run the packaged executable from the release folder:
-
-```powershell
-cd dist\sni-spoofing-proxy-<version>-windows-x64
-.\sni-spoof.exe --dry-run
-.\sni-spoof.exe run --log-level DEBUG
-```
-
-Use an Administrator PowerShell for `run` because WinDivert requires elevated privileges. The bundle also includes `Start-SNI-Spoof-Admin.cmd` for a quick UAC-assisted launch while keeping normal console behavior for `--help`, `--dry-run`, `doctor`, `pac`, and profile commands.
-
-### GitHub Actions
-
-The repository includes a Windows release workflow at `.github/workflows/windows-release.yml`.
-
-- Pull requests and pushes to `main` build the Windows x64 ZIP and upload it as a workflow artifact.
-- Manual runs are available from the GitHub Actions tab through `workflow_dispatch`.
-- Version tags such as `vX.Y.Z` build the same artifact and attach the ZIP plus `.sha256` file to a draft GitHub Release.
-
-To publish a release from CI:
-
-```powershell
-git tag vX.Y.Z
-git push origin vX.Y.Z
-```
-
-Review the generated draft release in GitHub before publishing it.
+Project release archives are produced by the repository CI workflow at `.github/workflows/windows-release.yml`.
 
 ## Packaging
 
